@@ -1,13 +1,19 @@
 -- MariaDB schema for WhatsAtende helpdesk system
 
-CREATE TABLE roles (
+CREATE DATABASE IF NOT EXISTS whats_atende
+    DEFAULT CHARACTER SET utf8mb4
+    DEFAULT COLLATE utf8mb4_unicode_ci;
+USE whats_atende;
+
+CREATE TABLE IF NOT EXISTS roles (
     id TINYINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(50) NOT NULL UNIQUE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO roles (name) VALUES ('admin'), ('agent');
+INSERT INTO roles (name) VALUES ('admin'), ('agent')
+    ON DUPLICATE KEY UPDATE name = VALUES(name);
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     role_id TINYINT UNSIGNED NOT NULL,
     full_name VARCHAR(150) NOT NULL,
@@ -20,9 +26,9 @@ CREATE TABLE users (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES roles(id)
         ON UPDATE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE contacts (
+CREATE TABLE IF NOT EXISTS contacts (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     external_id VARCHAR(190) NOT NULL UNIQUE,
     display_name VARCHAR(150) NULL,
@@ -31,9 +37,9 @@ CREATE TABLE contacts (
     last_interaction_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE tickets (
+CREATE TABLE IF NOT EXISTS tickets (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     contact_id BIGINT UNSIGNED NOT NULL,
     subject VARCHAR(191) NULL,
@@ -48,18 +54,18 @@ CREATE TABLE tickets (
         ON UPDATE CASCADE,
     CONSTRAINT fk_tickets_assigned_user FOREIGN KEY (assigned_user_id) REFERENCES users(id)
         ON UPDATE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE ticket_metrics (
+CREATE TABLE IF NOT EXISTS ticket_metrics (
     ticket_id BIGINT UNSIGNED PRIMARY KEY,
     first_response_at DATETIME NULL,
     last_response_at DATETIME NULL,
     resolution_time_seconds INT UNSIGNED NULL,
     CONSTRAINT fk_ticket_metrics_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id)
         ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE messages (
+CREATE TABLE IF NOT EXISTS messages (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     ticket_id BIGINT UNSIGNED NOT NULL,
     sender_type ENUM('contact','agent','system') NOT NULL,
@@ -67,15 +73,16 @@ CREATE TABLE messages (
     body TEXT NULL,
     media_type ENUM('text','image','audio','video','file') NOT NULL DEFAULT 'text',
     media_url VARCHAR(255) NULL,
-    metadata JSON NULL,
+    metadata LONGTEXT NULL,
+    CHECK (metadata IS NULL OR JSON_VALID(metadata)),
     sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_messages_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id)
         ON DELETE CASCADE,
     CONSTRAINT fk_messages_user FOREIGN KEY (user_id) REFERENCES users(id)
         ON UPDATE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE templates (
+CREATE TABLE IF NOT EXISTS templates (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     title VARCHAR(150) NOT NULL,
     body TEXT NOT NULL,
@@ -88,31 +95,33 @@ CREATE TABLE templates (
         ON UPDATE CASCADE,
     CONSTRAINT fk_templates_updated_by FOREIGN KEY (updated_by) REFERENCES users(id)
         ON UPDATE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE logs (
+CREATE TABLE IF NOT EXISTS logs (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id BIGINT UNSIGNED NULL,
     level ENUM('info','warning','error','critical') NOT NULL DEFAULT 'info',
     action VARCHAR(150) NOT NULL,
     message TEXT NOT NULL,
-    context JSON NULL,
+    context LONGTEXT NULL,
+    CHECK (context IS NULL OR JSON_VALID(context)),
     ip_address VARCHAR(45) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_logs_user FOREIGN KEY (user_id) REFERENCES users(id)
         ON UPDATE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE webhook_events (
+CREATE TABLE IF NOT EXISTS webhook_events (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     provider VARCHAR(80) NOT NULL,
     external_message_id VARCHAR(191) NULL,
-    payload JSON NOT NULL,
+    payload LONGTEXT NOT NULL,
+    CHECK (JSON_VALID(payload)),
     processed TINYINT(1) NOT NULL DEFAULT 0,
     processed_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_webhook_provider_message (provider, external_message_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE INDEX idx_tickets_status ON tickets(status);
 CREATE INDEX idx_tickets_assigned_user ON tickets(assigned_user_id);
