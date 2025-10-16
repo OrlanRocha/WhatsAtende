@@ -8,15 +8,22 @@ Este repositório contém a proposta de arquitetura para o sistema de atendiment
 app/
   helpers.php
   Controllers/
+    AuthController.php
     TicketController.php
     WebhookController.php
   Models/
     Ticket.php
   Services/
+    AuthService.php
     LoggerService.php
     TicketService.php
     WebhookService.php
   Views/
+    auth/
+      forgot.php
+      login.php
+      register.php
+      reset.php
     atendimento.php
 config/
   database.php
@@ -42,6 +49,7 @@ O arquivo [`database/schema.sql`](database/schema.sql) traz o SQL completo para 
 - **MVC + Services:** Controllers finos que delegam lógica de negócio para serviços (`TicketService`, `WebhookService`).
 - **Webhook Resiliente:** Armazenamento do payload bruto, idempotência via chave única e transação para garantir consistência.
 - **Painel Responsivo:** View `atendimento.php` usa Bootstrap 5 e jQuery para chat em tempo real com suporte a mídias.
+- **Autenticação Completa:** Fluxo de login, cadastro, logout e recuperação de senha com tokens de redefinição persistidos no banco.
 - **Logs Centralizados:** `LoggerService` grava eventos críticos na tabela `logs`, permitindo auditoria completa.
 - **Preparado para Métricas:** A tabela `ticket_metrics` facilita cálculo de tempos médios e indicadores do dashboard administrativo.
 

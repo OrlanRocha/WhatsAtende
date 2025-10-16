@@ -55,9 +55,10 @@ class TicketService
     public function getTicketWithMessages(int $ticketId): array
     {
         $stmt = $this->connection->prepare(
-            'SELECT t.*, c.display_name AS contact_name, c.external_id AS contact_external_id
+            'SELECT t.*, c.display_name AS contact_name, c.external_id AS contact_external_id, au.full_name AS agent_name
              FROM tickets t
              INNER JOIN contacts c ON c.id = t.contact_id
+             LEFT JOIN users au ON au.id = t.assigned_user_id
              WHERE t.id = :id'
         );
         $stmt->execute(['id' => $ticketId]);
@@ -129,5 +130,17 @@ class TicketService
         ]);
 
         $this->logger->info('ticket.resolved', ['ticket_id' => $ticketId]);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function listMessageTemplates(): array
+    {
+        $stmt = $this->connection->query(
+            'SELECT id, title, body, category FROM templates ORDER BY title ASC'
+        );
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 }

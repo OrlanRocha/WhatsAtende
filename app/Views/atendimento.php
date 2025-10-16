@@ -1,6 +1,9 @@
 <?php
 /** @var array<string, mixed> $ticket */
 /** @var array<int, array<string, mixed>> $templates */
+
+$user = auth();
+$status = get_flash('auth_status');
 ?>
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -22,7 +25,26 @@
     </style>
 </head>
 <body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="/tickets">WhatsAtende</a>
+        <div class="d-flex align-items-center gap-3">
+            <?php if ($user): ?>
+                <span class="text-light small"><?= htmlspecialchars($user->full_name ?? '') ?></span>
+                <form method="POST" action="/logout" class="m-0">
+                    <button type="submit" class="btn btn-outline-light btn-sm">Sair</button>
+                </form>
+            <?php endif; ?>
+        </div>
+    </div>
+</nav>
 <div class="container-fluid py-4">
+    <?php if (!empty($status)): ?>
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <?= htmlspecialchars($status) ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fechar"></button>
+        </div>
+    <?php endif; ?>
     <div class="row g-4">
         <div class="col-lg-8">
             <div class="card shadow-sm">

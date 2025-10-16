@@ -123,7 +123,21 @@ CREATE TABLE IF NOT EXISTS webhook_events (
     UNIQUE KEY uq_webhook_provider_message (provider, external_message_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS password_resets (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT UNSIGNED NOT NULL,
+    token_hash CHAR(64) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    used_at DATETIME NULL,
+    requested_ip VARCHAR(45) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_password_resets_user FOREIGN KEY (user_id) REFERENCES users(id)
+        ON DELETE CASCADE,
+    UNIQUE KEY uq_password_resets_token (token_hash)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE INDEX idx_tickets_status ON tickets(status);
 CREATE INDEX idx_tickets_assigned_user ON tickets(assigned_user_id);
 CREATE INDEX idx_messages_ticket_sent_at ON messages(ticket_id, sent_at);
 CREATE INDEX idx_logs_created_at ON logs(created_at);
+CREATE INDEX idx_password_resets_expires_at ON password_resets(expires_at);

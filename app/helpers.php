@@ -53,9 +53,58 @@ function redirect(string $path, int $status = 302): void
     exit;
 }
 
-function auth(): object
+function auth(): ?object
 {
-    $userId = $_SESSION['user_id'] ?? 1;
+    if (!isset($_SESSION['auth_user'])) {
+        return null;
+    }
 
-    return (object) ['id' => (int) $userId];
+    return (object) $_SESSION['auth_user'];
+}
+
+function require_auth(): object
+{
+    $user = auth();
+
+    if ($user === null) {
+        set_flash('auth_error', 'Faça login para continuar.');
+        redirect('/login');
+    }
+
+    return $user;
+}
+
+function login_user(array $user): void
+{
+    $_SESSION['auth_user'] = [
+        'id' => (int) ($user['id'] ?? 0),
+        'full_name' => (string) ($user['full_name'] ?? ''),
+        'email' => (string) ($user['email'] ?? ''),
+        'role' => $user['role'] ?? null,
+    ];
+
+    session_regenerate_id(true);
+}
+
+function logout_user(): void
+{
+    unset($_SESSION['auth_user']);
+    session_regenerate_id(true);
+}
+
+function set_flash(string $key, mixed $value): void
+{
+    $_SESSION['flash'][$key] = $value;
+}
+
+function get_flash(string $key, mixed $default = null): mixed
+{
+    if (!isset($_SESSION['flash'][$key])) {
+        return $default;
+    }
+
+    $value = $_SESSION['flash'][$key];
+    unset($_SESSION['flash'][$key]);
+
+    return $value;
 }

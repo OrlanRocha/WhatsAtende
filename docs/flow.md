@@ -32,3 +32,7 @@
 8. **Finalização**
    - Ao encerrar o atendimento, `TicketController::resolve()` altera o status do ticket para `resolved` e registra métricas de tempo.
    - A ação é logada pelo `LoggerService`, mantendo rastreabilidade completa.
+
+9. **Autenticação e Recuperação de Acesso**
+   - Todo acesso ao painel passa por `AuthController`, que expõe rotas para login, cadastro e logout utilizando o `AuthService`.
+   - Tokens de redefinição são gerados e armazenados em `password_resets`, permitindo o fluxo "Esqueci minha senha" com verificação de expiração e auditoria via `LoggerService`.

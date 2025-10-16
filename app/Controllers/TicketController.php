@@ -18,6 +18,7 @@ class TicketController
 
     public function index(): void
     {
+        require_auth();
         $queue = $this->ticketService->getOpenQueue();
 
         view('tickets/queue', [
@@ -27,6 +28,7 @@ class TicketController
 
     public function show(int $ticketId): void
     {
+        require_auth();
         try {
             $ticket = $this->ticketService->getTicketWithMessages($ticketId);
         } catch (Throwable $exception) {
@@ -40,14 +42,18 @@ class TicketController
             return;
         }
 
+        $templates = $this->ticketService->listMessageTemplates();
+
         view('tickets/show', [
             'ticket' => $ticket,
+            'templates' => $templates,
         ]);
     }
 
     public function assign(int $ticketId): void
     {
-        $userId = auth()->id();
+        $user = require_auth();
+        $userId = (int) $user->id;
         $this->ticketService->assignToUser($ticketId, $userId);
 
         redirect('/tickets/' . $ticketId);
@@ -55,6 +61,7 @@ class TicketController
 
     public function storeMessage(int $ticketId): void
     {
+        $user = require_auth();
         $body = trim($_POST['message'] ?? '');
         if ($body === '') {
             http_response_code(422);
@@ -63,7 +70,7 @@ class TicketController
             return;
         }
 
-        $userId = auth()->id();
+        $userId = (int) $user->id;
         $this->ticketService->appendAgentMessage($ticketId, $userId, $body);
 
         header('Content-Type: application/json');
@@ -73,6 +80,7 @@ class TicketController
 
     public function messages(int $ticketId): void
     {
+        require_auth();
         try {
             $ticket = $this->ticketService->getTicketWithMessages($ticketId);
         } catch (\Throwable $exception) {
@@ -88,6 +96,7 @@ class TicketController
 
     public function resolve(int $ticketId): void
     {
+        require_auth();
         $this->ticketService->resolveTicket($ticketId);
         redirect('/tickets');
     }

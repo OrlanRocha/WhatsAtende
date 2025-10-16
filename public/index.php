@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+use App\Controllers\AuthController;
 use App\Controllers\TicketController;
 use App\Controllers\WebhookController;
+use App\Services\AuthService;
 use App\Services\LoggerService;
 use App\Services\TicketService;
 use App\Services\WebhookService;
@@ -46,8 +48,10 @@ $container[\PDO::class] = static function () use ($databaseConfig): \PDO {
 };
 
 $container[LoggerService::class] = static fn () => new LoggerService(resolve(\PDO::class));
+$container[AuthService::class] = static fn () => new AuthService(resolve(\PDO::class), resolve(LoggerService::class));
 $container[TicketService::class] = static fn () => new TicketService(resolve(\PDO::class), resolve(LoggerService::class));
 $container[WebhookService::class] = static fn () => new WebhookService(resolve(\PDO::class), resolve(LoggerService::class));
+$container[AuthController::class] = static fn () => new AuthController(resolve(AuthService::class));
 $container[TicketController::class] = static fn () => new TicketController(resolve(TicketService::class), resolve(LoggerService::class));
 $container[WebhookController::class] = static fn () => new WebhookController(resolve(WebhookService::class));
 
