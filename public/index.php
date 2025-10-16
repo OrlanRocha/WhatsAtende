@@ -22,9 +22,7 @@ use App\Services\TicketService;
 use App\Services\UserService;
 use App\Services\WebhookService;
 
-session_start();
-
-require __DIR__ . '/../app/helpers.php';
+require __DIR__ . '/../app/bootstrap.php';
 
 spl_autoload_register(static function (string $class): void {
     $prefix = 'App\\';

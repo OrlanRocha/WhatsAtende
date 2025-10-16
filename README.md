@@ -71,6 +71,14 @@ Para popular o ambiente com dados de exemplo (contas iniciais, templates e um ti
 > - Admin: `admin@example.com` / `Admin123!`
 > - Atendente: `agent@example.com` / `Agent123!`
 
+## Configuração de Ambiente
+
+- Copie o arquivo `.env.example` para `.env` e ajuste as variáveis obrigatórias:
+  - `ADMIN_USERNAME` e `ADMIN_PASSWORD` são usados na preparação inicial do ambiente.
+  - `EVO_API_BASE`, `EVO_INSTANCE` e `EVO_API_KEY` habilitam a integração nativa com a Evolution API.
+  - Caso utilize Webhook, defina também `WEBHOOK_URL` e `WEBHOOK_TOKEN`.
+- Os valores ausentes são reportados no arquivo de log `storage/logs/app.log`, permitindo identificar rapidamente inconsistências de configuração.
+
 ## Pontos de Destaque
 
 - **MVC + Services:** Controllers finos que delegam lógica de negócio para serviços (`TicketService`, `UserService`, `TemplateService`, `WebhookService`).

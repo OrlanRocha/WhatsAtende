@@ -26,15 +26,26 @@ class SettingService
      */
     public function integrationSettings(): array
     {
+        $defaults = [
+            'integration_mode' => (string) \env('INTEGRATION_MODE', 'webhook'),
+            'webhook_url' => \env('WEBHOOK_URL'),
+            'webhook_token' => \env('WEBHOOK_TOKEN'),
+            'evolution_api_url' => \env('EVO_API_BASE'),
+            'evolution_instance' => \env('EVO_INSTANCE'),
+            'evolution_api_key' => \env('EVO_API_KEY'),
+            'evolution_token' => \env('EVO_TOKEN'),
+            'evolution_default_template' => \env('EVO_DEFAULT_TEMPLATE'),
+        ];
+
         return [
-            'integration_mode' => $this->get('integration_mode', 'webhook'),
-            'webhook_url' => $this->get('webhook_url'),
-            'webhook_token' => $this->get('webhook_token'),
-            'evolution_api_url' => $this->get('evolution_api_url'),
-            'evolution_instance' => $this->get('evolution_instance'),
-            'evolution_api_key' => $this->get('evolution_api_key'),
-            'evolution_token' => $this->get('evolution_token'),
-            'evolution_default_template' => $this->get('evolution_default_template'),
+            'integration_mode' => $this->get('integration_mode', $defaults['integration_mode']),
+            'webhook_url' => $this->get('webhook_url') ?? $defaults['webhook_url'],
+            'webhook_token' => $this->get('webhook_token') ?? $defaults['webhook_token'],
+            'evolution_api_url' => $this->get('evolution_api_url') ?? $defaults['evolution_api_url'],
+            'evolution_instance' => $this->get('evolution_instance') ?? $defaults['evolution_instance'],
+            'evolution_api_key' => $this->get('evolution_api_key') ?? $defaults['evolution_api_key'],
+            'evolution_token' => $this->get('evolution_token') ?? $defaults['evolution_token'],
+            'evolution_default_template' => $this->get('evolution_default_template') ?? $defaults['evolution_default_template'],
         ];
     }
 

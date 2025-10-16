@@ -4,15 +4,23 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Support\FileLogger;
 use RuntimeException;
+use function app_logger;
 
 class EvolutionService
 {
     private const PROFILE_CACHE_SECONDS = 3600; // 1 hour
     private const MEDIA_CACHE_SECONDS = 86400;  // 24 hours
 
-    public function __construct(private SettingService $settings, private LoggerService $logger)
-    {
+    private FileLogger $httpLogger;
+
+    public function __construct(
+        private SettingService $settings,
+        private LoggerService $logger,
+        ?FileLogger $httpLogger = null
+    ) {
+        $this->httpLogger = $httpLogger ?? app_logger();
     }
 
     public function isNativeEnabled(): bool
@@ -176,6 +184,11 @@ class EvolutionService
             throw new RuntimeException('Payload de envio deve conter o número do destinatário.');
         }
 
+        $payload['number'] = $this->sanitizeContactNumber((string) $payload['number']);
+        if (isset($payload['text'])) {
+            $payload['text'] = $this->sanitizeMessageBody((string) $payload['text']);
+        }
+
         return $this->makeRequest($config, 'POST', '/message/sendText/' . $config['instance'], $payload);
     }
 
@@ -318,6 +331,8 @@ class EvolutionService
                 'error' => $curlError ?: 'unknown',
             ]);
 
+            $this->logHttp($method, $endpoint, $payload, 500, null, $curlError ?: 'curl_exec_failed');
+
             return ['status' => 500, 'success' => false, 'data' => null, 'error' => $curlError ?: 'curl_exec_failed'];
         }
 
@@ -345,6 +360,15 @@ class EvolutionService
             ]);
         }
 
+        $this->logHttp(
+            $method,
+            $endpoint,
+            $payload,
+            $status,
+            $decoded ?? $responseBody,
+            $success ? null : ($curlError ?: 'http_' . $status)
+        );
+
         return [
             'status' => $status,
             'success' => $success,
@@ -366,6 +390,74 @@ class EvolutionService
             'data' => null,
             'error' => 'Integração nativa não configurada.',
         ];
+    }
+
+    private function sanitizeContactNumber(string $number): string
+    {
+        $digitsOnly = preg_replace('/\D+/', '', $number);
+        if ($digitsOnly === null || $digitsOnly === '') {
+            throw new RuntimeException('Número inválido informado para Evolution API.');
+        }
+
+        return substr($digitsOnly, 0, 20);
+    }
+
+    private function sanitizeMessageBody(string $message): string
+    {
+        $clean = strip_tags($message);
+        $normalized = preg_replace("/[\r\n]+/", "\n", $clean);
+        if (is_string($normalized)) {
+            $clean = $normalized;
+        }
+        $clean = trim($clean);
+
+        if (function_exists('mb_substr')) {
+            return mb_substr($clean, 0, 1024);
+        }
+
+        return substr($clean, 0, 1024);
+    }
+
+    private function logHttp(string $method, string $endpoint, ?array $payload, int $status, mixed $response, ?string $error): void
+    {
+        $context = [
+            'method' => $method,
+            'endpoint' => $endpoint,
+            'status' => $status,
+            'payload' => $payload,
+        ];
+
+        if ($response !== null) {
+            $context['response'] = $this->truncateResponse($response);
+        }
+
+        if ($error !== null) {
+            $context['error'] = $error;
+        }
+
+        if ($error === null && $status >= 200 && $status < 400) {
+            $this->httpLogger->info('evolution.http', $context);
+        } else {
+            $this->httpLogger->error('evolution.http', $context);
+        }
+    }
+
+    private function truncateResponse(mixed $response): mixed
+    {
+        if (is_string($response) && strlen($response) > 2048) {
+            return substr($response, 0, 2048) . '...';
+        }
+
+        if (is_array($response)) {
+            $result = [];
+            foreach ($response as $key => $value) {
+                $result[$key] = $this->truncateResponse($value);
+            }
+
+            return $result;
+        }
+
+        return $response;
     }
 
     /**
