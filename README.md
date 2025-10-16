@@ -29,6 +29,7 @@ config/
   database.php
 database/
   schema.sql
+  seeds.sql
 docs/
   flow.md
 public/
@@ -43,6 +44,12 @@ routes/
 ## Schema do Banco de Dados
 
 O arquivo [`database/schema.sql`](database/schema.sql) traz o SQL completo para criação das tabelas `users`, `roles`, `contacts`, `tickets`, `ticket_metrics`, `messages`, `templates`, `logs` e `webhook_events`, com índices e relacionamentos adequados ao MariaDB.
+
+Para popular o ambiente com dados de exemplo (contas iniciais, templates e um ticket demonstrativo), execute também [`database/seeds.sql`](database/seeds.sql) após criar o schema.
+
+> Credenciais iniciais:
+> - Admin: `admin@example.com` / `Admin123!`
+> - Atendente: `agent@example.com` / `Agent123!`
 
 ## Pontos de Destaque
 
