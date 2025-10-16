@@ -20,10 +20,20 @@ class DashboardController
         require_role('admin');
 
         $summary = $this->dashboardService->summary();
-        $recentTickets = $this->dashboardService->recentTickets();
-        $channels = $this->dashboardService->channelBreakdown();
-        $leaderboard = $this->dashboardService->agentLeaderboard();
-        $queue = $this->ticketService->getOpenQueue();
+       $recentTickets = $this->dashboardService->recentTickets();
+       $channels = $this->dashboardService->channelBreakdown();
+       $leaderboard = $this->dashboardService->agentLeaderboard();
+       $queue = $this->ticketService->getOpenQueue();
+
+        if (is_ajax()) {
+            json_response([
+                'summary' => $summary,
+                'recentTickets' => $recentTickets,
+                'channels' => $channels,
+                'leaderboard' => $leaderboard,
+                'queue' => $queue,
+            ]);
+        }
 
         view('admin/dashboard', [
             'summary' => $summary,

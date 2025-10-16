@@ -24,22 +24,38 @@ class SettingService
     /**
      * @return array<string, string|null>
      */
-    public function webhookSettings(): array
+    public function integrationSettings(): array
     {
         return [
+            'integration_mode' => $this->get('integration_mode', 'webhook'),
             'webhook_url' => $this->get('webhook_url'),
             'webhook_token' => $this->get('webhook_token'),
+            'evolution_api_url' => $this->get('evolution_api_url'),
+            'evolution_instance' => $this->get('evolution_instance'),
+            'evolution_token' => $this->get('evolution_token'),
+            'evolution_default_template' => $this->get('evolution_default_template'),
         ];
     }
 
-    public function updateWebhookSettings(int $userId, string $url, string $token): void
+    public function updateIntegrationSettings(int $userId, array $data): void
     {
-        $this->set('webhook_url', $url, $userId, 'URL pública utilizada para integrar Evolution API.');
-        $this->set('webhook_token', $token, $userId, 'Token compartilhado para validar requisições.');
+        $mode = $data['integration_mode'] ?? 'webhook';
+        $this->set('integration_mode', $mode, $userId, 'Modo de integração atual (webhook ou native).');
 
-        $this->logger->info('admin.webhook_settings_updated', [
+        if ($mode === 'webhook') {
+            $this->set('webhook_url', $data['webhook_url'] ?? null, $userId, 'URL pública utilizada para integrar Evolution API.');
+            $this->set('webhook_token', $data['webhook_token'] ?? null, $userId, 'Token compartilhado para validar requisições.');
+        } else {
+            $this->set('evolution_api_url', $data['evolution_api_url'] ?? null, $userId, 'Endpoint base da Evolution API.');
+            $this->set('evolution_instance', $data['evolution_instance'] ?? null, $userId, 'Instância utilizada para envio de mensagens.');
+            $this->set('evolution_token', $data['evolution_token'] ?? null, $userId, 'Token de autenticação da Evolution API.');
+            $this->set('evolution_default_template', $data['evolution_default_template'] ?? null, $userId, 'Mensagem automática inicial para atendimentos.');
+        }
+
+        $this->logger->info('admin.integration_settings_updated', [
             'user_id' => $userId,
-            'message' => 'Configurações do webhook atualizadas.',
+            'mode' => $mode,
+            'message' => 'Configurações de integração atualizadas.',
         ]);
     }
 

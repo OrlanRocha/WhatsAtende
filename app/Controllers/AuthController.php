@@ -27,25 +27,39 @@ class AuthController
     public function login(): void
     {
         if (auth()) {
+            if (is_ajax()) {
+                json_response(['redirect' => '/tickets']);
+            }
             redirect('/tickets');
         }
 
         $email = filter_input(INPUT_POST, 'email', FILTER_SANITIZE_EMAIL) ?: '';
         $password = $_POST['password'] ?? '';
+        $errors = [];
 
         if ($email === '' || $password === '') {
-            set_flash('auth_error', 'Informe e-mail e senha.');
-            redirect('/login');
+            $errors[] = 'Informe e-mail e senha.';
+        }
+
+        if ($errors !== []) {
+            $this->handleAuthError($errors, '/login');
         }
 
         $user = $this->authService->attempt($email, $password);
 
         if (!$user) {
-            set_flash('auth_error', 'Credenciais inválidas ou usuário inativo.');
-            redirect('/login');
+            $this->handleAuthError(['Credenciais inválidas ou usuário inativo.'], '/login');
         }
 
         login_user($user);
+
+        if (is_ajax()) {
+            json_response([
+                'message' => 'Bem-vindo de volta, ' . $user['full_name'] . '!',
+                'redirect' => '/tickets',
+            ]);
+        }
+
         set_flash('auth_status', 'Bem-vindo de volta, ' . $user['full_name'] . '!');
         redirect('/tickets');
     }
@@ -53,6 +67,14 @@ class AuthController
     public function logout(): void
     {
         logout_user();
+
+        if (is_ajax()) {
+            json_response([
+                'message' => 'Sessão encerrada com sucesso.',
+                'redirect' => '/login',
+            ]);
+        }
+
         set_flash('auth_status', 'Sessão encerrada com sucesso.');
         redirect('/login');
     }
@@ -100,28 +122,26 @@ class AuthController
         }
 
         if ($errors !== []) {
-            set_flash('register_errors', $errors);
-            set_flash('register_old', [
-                'full_name' => $fullName,
-                'email' => $email,
-                'cpf' => $cpf,
-            ]);
-            redirect('/register');
+            $this->handleRegisterError($errors, $fullName, $email, $cpf);
         }
 
         try {
             $user = $this->authService->register($fullName, $email, $cpf, $password);
         } catch (\Throwable $exception) {
-            set_flash('register_errors', ['Não foi possível concluir o cadastro. Verifique se o e-mail ou CPF já estão em uso.']);
-            set_flash('register_old', [
-                'full_name' => $fullName,
-                'email' => $email,
-                'cpf' => $cpf,
-            ]);
-            redirect('/register');
+            $this->handleRegisterError([
+                'Não foi possível concluir o cadastro. Verifique se o e-mail ou CPF já estão em uso.',
+            ], $fullName, $email, $cpf);
         }
 
         login_user($user);
+
+        if (is_ajax()) {
+            json_response([
+                'message' => 'Cadastro realizado com sucesso.',
+                'redirect' => '/tickets',
+            ]);
+        }
+
         set_flash('auth_status', 'Cadastro realizado com sucesso.');
         redirect('/tickets');
     }
@@ -141,19 +161,25 @@ class AuthController
     {
         $email = filter_input(INPUT_POST, 'email', FILTER_SANITIZE_EMAIL) ?: '';
 
-        if ($email === '') {
-            set_flash('auth_status', 'Se o e-mail existir em nossa base, você receberá instruções em instantes.');
-            redirect('/forgot-password');
+        if ($email !== '') {
+            $token = $this->authService->createPasswordReset($email);
+            if ($token) {
+                $message = 'Link de redefinição gerado. Utilize o token abaixo para continuar: ' . $token;
+                if (is_ajax()) {
+                    json_response(['message' => $message]);
+                }
+                set_flash('auth_status', $message);
+                redirect('/forgot-password');
+            }
         }
 
-        $token = $this->authService->createPasswordReset($email);
+        $fallback = 'Se o e-mail existir em nossa base, você receberá instruções em instantes.';
 
-        if ($token) {
-            set_flash('auth_status', 'Link de redefinição gerado. Utilize o token abaixo para continuar: ' . $token);
-        } else {
-            set_flash('auth_status', 'Se o e-mail existir em nossa base, você receberá instruções em instantes.');
+        if (is_ajax()) {
+            json_response(['message' => $fallback]);
         }
 
+        set_flash('auth_status', $fallback);
         redirect('/forgot-password');
     }
 
@@ -168,6 +194,8 @@ class AuthController
         view('auth/reset', [
             'token' => $token,
             'email' => $record['email'] ?? '',
+            'status' => get_flash('auth_status'),
+            'error' => get_flash('auth_error'),
         ]);
     }
 
@@ -177,29 +205,62 @@ class AuthController
         $password = $_POST['password'] ?? '';
         $passwordConfirmation = $_POST['password_confirmation'] ?? '';
 
+        $errors = [];
         if ($token === '' || $password === '' || $passwordConfirmation === '') {
-            set_flash('auth_status', 'Preencha todos os campos.');
-            redirect($_SERVER['HTTP_REFERER'] ?? '/forgot-password');
+            $errors[] = 'Preencha todos os campos.';
         }
 
         if ($password !== $passwordConfirmation) {
-            set_flash('auth_status', 'As senhas não conferem.');
-            redirect($_SERVER['HTTP_REFERER'] ?? '/forgot-password');
+            $errors[] = 'As senhas não conferem.';
         }
 
         if (strlen($password) < 8) {
-            set_flash('auth_status', 'A nova senha deve possuir ao menos 8 caracteres.');
-            redirect($_SERVER['HTTP_REFERER'] ?? '/forgot-password');
+            $errors[] = 'A nova senha deve possuir ao menos 8 caracteres.';
+        }
+
+        if ($errors !== []) {
+            $this->handleAuthError($errors, $_SERVER['HTTP_REFERER'] ?? '/forgot-password');
         }
 
         $updated = $this->authService->resetPassword($token, $password);
 
         if (!$updated) {
-            set_flash('auth_status', 'Token inválido ou expirado. Solicite uma nova redefinição.');
-            redirect('/forgot-password');
+            $this->handleAuthError(['Token inválido ou expirado. Solicite uma nova redefinição.'], '/forgot-password');
+        }
+
+        if (is_ajax()) {
+            json_response([
+                'message' => 'Senha redefinida com sucesso. Faça login novamente.',
+                'redirect' => '/login',
+            ]);
         }
 
         set_flash('auth_status', 'Senha redefinida com sucesso. Faça login novamente.');
         redirect('/login');
+    }
+
+    private function handleAuthError(array $errors, string $redirect): void
+    {
+        if (is_ajax()) {
+            json_response(['errors' => $errors], 422);
+        }
+
+        set_flash('auth_error', implode(' ', $errors));
+        redirect($redirect);
+    }
+
+    private function handleRegisterError(array $errors, string $fullName, string $email, string $cpf): void
+    {
+        if (is_ajax()) {
+            json_response(['errors' => $errors], 422);
+        }
+
+        set_flash('register_errors', $errors);
+        set_flash('register_old', [
+            'full_name' => $fullName,
+            'email' => $email,
+            'cpf' => $cpf,
+        ]);
+        redirect('/register');
     }
 }

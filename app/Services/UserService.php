@@ -20,12 +20,12 @@ class UserService
     public function listUsers(): array
     {
         $stmt = $this->connection->query(
-            'SELECT u.id, u.full_name, u.email, u.cpf, u.is_active, u.created_at, u.updated_at, '
+            'SELECT u.id, u.role_id, u.full_name, u.email, u.cpf, u.is_active, u.created_at, u.updated_at, '
             . 'r.name AS role, COUNT(t.id) AS assigned_tickets '
             . 'FROM users u '
             . 'INNER JOIN roles r ON r.id = u.role_id '
             . 'LEFT JOIN tickets t ON t.assigned_user_id = u.id AND t.status IN (\'open\', \'assigned\') '
-            . 'GROUP BY u.id, u.full_name, u.email, u.cpf, u.is_active, u.created_at, u.updated_at, r.name '
+            . 'GROUP BY u.id, u.role_id, u.full_name, u.email, u.cpf, u.is_active, u.created_at, u.updated_at, r.name '
             . 'ORDER BY u.full_name ASC'
         );
 

@@ -27,6 +27,7 @@ return [
     ['GET', '/admin/logs', [AdminLogController::class, 'index']],
     ['GET', '/admin/webhook', [AdminWebhookController::class, 'index']],
     ['POST', '/admin/webhook', [AdminWebhookController::class, 'update']],
+    ['POST', '/admin/webhook/test', [AdminWebhookController::class, 'test']],
     ['GET', '/login', [AuthController::class, 'showLoginForm']],
     ['POST', '/login', [AuthController::class, 'login']],
     ['POST', '/logout', [AuthController::class, 'logout']],

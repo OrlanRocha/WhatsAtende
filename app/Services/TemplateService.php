@@ -27,7 +27,7 @@ class TemplateService
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    public function create(string $title, string $body, ?string $category, int $userId): void
+    public function create(string $title, string $body, ?string $category, int $userId): array
     {
         $stmt = $this->connection->prepare(
             'INSERT INTO templates (title, body, category, created_by, updated_by) '
@@ -45,6 +45,10 @@ class TemplateService
             'user_id' => $userId,
             'message' => 'Template criado.',
         ]);
+
+        $templateId = (int) $this->connection->lastInsertId();
+
+        return $this->find($templateId) ?? [];
     }
 
     public function update(int $templateId, string $title, string $body, ?string $category, int $userId): void
@@ -78,5 +82,14 @@ class TemplateService
             'template_id' => $templateId,
             'message' => 'Template removido.',
         ]);
+    }
+
+    public function find(int $templateId): ?array
+    {
+        $stmt = $this->connection->prepare('SELECT * FROM templates WHERE id = :id');
+        $stmt->execute(['id' => $templateId]);
+        $template = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $template ?: null;
     }
 }

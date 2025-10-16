@@ -16,9 +16,14 @@ class TemplateController
     public function index(): void
     {
         require_role('admin');
+        $templates = $this->templateService->list();
+
+        if (is_ajax()) {
+            json_response(['templates' => $templates]);
+        }
 
         view('admin/templates/index', [
-            'templates' => $this->templateService->list(),
+            'templates' => $templates,
             'status' => get_flash('admin_status'),
             'error' => get_flash('admin_error'),
             'formErrors' => get_flash('template_errors') ?? [],
@@ -29,6 +34,7 @@ class TemplateController
     public function store(): void
     {
         $admin = require_role('admin');
+        $isAjax = is_ajax();
 
         $title = trim($_POST['title'] ?? '');
         $body = trim($_POST['body'] ?? '');
@@ -36,21 +42,28 @@ class TemplateController
 
         $errors = $this->validateTemplate($title, $body);
         if ($errors !== []) {
-            $this->flashForm($errors, [
+            $this->handleFormError($errors, [
                 'title' => $title,
                 'body' => $body,
                 'category' => $category,
-            ]);
+            ], $isAjax);
         }
 
         try {
-            $this->templateService->create($title, $body, $category, (int) $admin->id);
+            $template = $this->templateService->create($title, $body, $category, (int) $admin->id);
         } catch (PDOException $exception) {
             $errors[] = 'Não foi possível salvar o template. Tente novamente.';
-            $this->flashForm($errors, [
+            $this->handleFormError($errors, [
                 'title' => $title,
                 'body' => $body,
                 'category' => $category,
+            ], $isAjax);
+        }
+
+        if ($isAjax) {
+            json_response([
+                'message' => 'Template criado com sucesso.',
+                'template' => $template,
             ]);
         }
 
@@ -61,6 +74,7 @@ class TemplateController
     public function update(int $templateId): void
     {
         $admin = require_role('admin');
+        $isAjax = is_ajax();
 
         $title = trim($_POST['title'] ?? '');
         $body = trim($_POST['body'] ?? '');
@@ -68,21 +82,28 @@ class TemplateController
 
         $errors = $this->validateTemplate($title, $body);
         if ($errors !== []) {
-            $this->flashForm($errors, [
+            $this->handleFormError($errors, [
                 'title' => $title,
                 'body' => $body,
                 'category' => $category,
-            ]);
+            ], $isAjax);
         }
 
         try {
             $this->templateService->update($templateId, $title, $body, $category, (int) $admin->id);
         } catch (PDOException $exception) {
             $errors[] = 'Não foi possível atualizar o template.';
-            $this->flashForm($errors, [
+            $this->handleFormError($errors, [
                 'title' => $title,
                 'body' => $body,
                 'category' => $category,
+            ], $isAjax);
+        }
+
+        if ($isAjax) {
+            json_response([
+                'message' => 'Template atualizado com sucesso.',
+                'template' => $this->templateService->find($templateId),
             ]);
         }
 
@@ -93,8 +114,14 @@ class TemplateController
     public function destroy(int $templateId): void
     {
         $admin = require_role('admin');
+        $isAjax = is_ajax();
 
         $this->templateService->delete($templateId, (int) $admin->id);
+
+        if ($isAjax) {
+            json_response(['message' => 'Template removido.']);
+        }
+
         set_flash('admin_status', 'Template removido.');
         redirect('/admin/templates');
     }
@@ -113,8 +140,12 @@ class TemplateController
         return $errors;
     }
 
-    private function flashForm(array $errors, array $old): void
+    private function handleFormError(array $errors, array $old, bool $ajax): void
     {
+        if ($ajax) {
+            json_response(['errors' => $errors], 422);
+        }
+
         set_flash('template_errors', $errors);
         set_flash('template_old', $old);
         redirect('/admin/templates');

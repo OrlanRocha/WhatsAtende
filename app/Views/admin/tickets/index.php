@@ -1,37 +1,32 @@
 <?php
 /** @var array<int, array<string, mixed>> $tickets */
 /** @var string|null $statusFilter */
+$pageTitle = 'Solicitações · WhatsAtende';
+include base_path('app/Views/partials/layout-start.php');
+include base_path('app/Views/admin/partials/nav.php');
 ?>
-<!doctype html>
-<html lang="pt-BR">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Solicitações · WhatsAtende</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
-</head>
-<body class="bg-light">
-<?php include base_path('app/Views/admin/partials/nav.php'); ?>
-<div class="container py-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1 class="h3 mb-0">Solicitações</h1>
-        <form class="d-flex align-items-center gap-2" method="GET" action="/admin/tickets">
-            <label for="status" class="form-label mb-0">Status:</label>
-            <select name="status" id="status" class="form-select form-select-sm" onchange="this.form.submit()">
+<div class="container-xxl py-4" id="tickets-page">
+    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-start align-items-lg-center gap-3 mb-4">
+        <div>
+            <h1 class="h3 fw-semibold mb-1">Solicitações</h1>
+            <p class="text-muted mb-0">Visualize todos os chamados com filtros instantâneos e ações rápidas.</p>
+        </div>
+        <div class="d-flex flex-wrap align-items-center gap-2">
+            <label for="ticket-status" class="form-label mb-0">Status</label>
+            <select id="ticket-status" class="form-select form-select-sm" data-filter>
                 <option value="">Todos</option>
                 <option value="open" <?= $statusFilter === 'open' ? 'selected' : '' ?>>Aguardando</option>
                 <option value="assigned" <?= $statusFilter === 'assigned' ? 'selected' : '' ?>>Em atendimento</option>
                 <option value="resolved" <?= $statusFilter === 'resolved' ? 'selected' : '' ?>>Resolvidos</option>
                 <option value="closed" <?= $statusFilter === 'closed' ? 'selected' : '' ?>>Encerrados</option>
             </select>
-        </form>
+        </div>
     </div>
-    <div class="card shadow-sm">
+    <div class="card shadow-sm border-0">
         <div class="card-body p-0">
             <div class="table-responsive">
-                <table class="table align-middle mb-0">
-                    <thead class="table-light">
+                <table class="table align-middle mb-0" id="tickets-table" data-table>
+                    <thead>
                     <tr>
                         <th>#</th>
                         <th>Contato</th>
@@ -54,22 +49,20 @@
                             <td><?= htmlspecialchars((string) ($ticket['channel'] ?? 'whatsapp')) ?></td>
                             <td><?= htmlspecialchars(date('d/m/Y H:i', strtotime($ticket['opened_at'] ?? 'now'))) ?></td>
                             <td><?= !empty($ticket['closed_at']) ? htmlspecialchars(date('d/m/Y H:i', strtotime($ticket['closed_at']))) : '—' ?></td>
-                            <td><span class="badge bg-info text-capitalize"><?= htmlspecialchars((string) ($ticket['priority'] ?? 'normal')) ?></span></td>
+                            <td><span class="badge bg-info-subtle text-info text-capitalize fw-semibold"><?= htmlspecialchars((string) ($ticket['priority'] ?? 'normal')) ?></span></td>
                             <td class="text-end">
-                                <a href="/tickets/<?= urlencode((string) ($ticket['id'] ?? '')) ?>" class="btn btn-sm btn-outline-primary">Abrir chat</a>
+                                <a href="/tickets/<?= urlencode((string) ($ticket['id'] ?? '')) ?>" class="btn btn-sm btn-outline-primary"><i class="bi bi-chat-dots"></i> Abrir chat</a>
                             </td>
                         </tr>
                     <?php endforeach; ?>
-                    <?php if (empty($tickets)): ?>
-                        <tr>
-                            <td colspan="9" class="text-center text-muted py-4">Nenhuma solicitação encontrada.</td>
-                        </tr>
-                    <?php endif; ?>
                     </tbody>
                 </table>
             </div>
         </div>
     </div>
 </div>
-</body>
-</html>
+<script type="module">
+import { initTicketList } from '/js/modules/tickets.js';
+initTicketList('#tickets-page', '/admin/tickets');
+</script>
+<?php include base_path('app/Views/partials/layout-end.php'); ?>

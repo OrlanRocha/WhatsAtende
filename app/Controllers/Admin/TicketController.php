@@ -19,6 +19,10 @@ class TicketController
         $status = filter_input(INPUT_GET, 'status', FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: null;
         $tickets = $this->ticketService->listTickets($status);
 
+        if (is_ajax()) {
+            json_response(['tickets' => $tickets]);
+        }
+
         view('admin/tickets/index', [
             'tickets' => $tickets,
             'statusFilter' => $status,

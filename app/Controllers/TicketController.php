@@ -21,6 +21,10 @@ class TicketController
         require_auth();
         $queue = $this->ticketService->getOpenQueue();
 
+        if (is_ajax()) {
+            json_response(['queue' => $queue]);
+        }
+
         view('tickets/queue', [
             'queue' => $queue,
         ]);
@@ -54,12 +58,22 @@ class TicketController
     {
         $user = require_auth();
         if (!in_array($user->role ?? null, ['admin', 'agent'], true)) {
+            if (is_ajax()) {
+                json_response(['message' => 'Acesso restrito a atendentes.'], 403);
+            }
             http_response_code(403);
             echo 'Acesso restrito a atendentes.';
             return;
         }
         $userId = (int) $user->id;
         $this->ticketService->assignToUser($ticketId, $userId);
+
+        if (is_ajax()) {
+            json_response([
+                'message' => 'Chamado atribuído com sucesso.',
+                'redirect' => '/tickets/' . $ticketId,
+            ]);
+        }
 
         redirect('/tickets/' . $ticketId);
     }
@@ -68,6 +82,9 @@ class TicketController
     {
         $user = require_auth();
         if (!in_array($user->role ?? null, ['admin', 'agent'], true)) {
+            if (is_ajax()) {
+                json_response(['message' => 'Acesso restrito a atendentes.'], 403);
+            }
             http_response_code(403);
             header('Content-Type: application/json');
             echo json_encode(['error' => 'Acesso restrito a atendentes.']);
@@ -84,8 +101,7 @@ class TicketController
         $userId = (int) $user->id;
         $this->ticketService->appendAgentMessage($ticketId, $userId, $body);
 
-        header('Content-Type: application/json');
-        echo json_encode(['status' => 'ok']);
+        json_response(['message' => 'Mensagem enviada.']);
     }
 
 
@@ -109,11 +125,22 @@ class TicketController
     {
         $user = require_auth();
         if (!in_array($user->role ?? null, ['admin', 'agent'], true)) {
+            if (is_ajax()) {
+                json_response(['message' => 'Acesso restrito a atendentes.'], 403);
+            }
             http_response_code(403);
             echo 'Acesso restrito a atendentes.';
             return;
         }
         $this->ticketService->resolveTicket($ticketId);
+
+        if (is_ajax()) {
+            json_response([
+                'message' => 'Chamado finalizado com sucesso.',
+                'redirect' => '/tickets',
+            ]);
+        }
+
         redirect('/tickets');
     }
 }

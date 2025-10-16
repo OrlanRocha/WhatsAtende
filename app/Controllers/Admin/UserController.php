@@ -17,8 +17,15 @@ class UserController
     {
         require_role('admin');
 
+        $users = $this->userService->listUsers();
+
+        if (is_ajax()) {
+            json_response(['users' => $users]);
+        }
+
         view('admin/users/index', [
-            'users' => $this->userService->listUsers(),
+            'users' => $users,
+            'roles' => $this->userService->listRoles(),
             'status' => get_flash('admin_status'),
             'error' => get_flash('admin_error'),
         ]);
@@ -39,6 +46,7 @@ class UserController
     public function store(): void
     {
         $admin = require_role('admin');
+        $isAjax = is_ajax();
 
         $fullName = trim($_POST['full_name'] ?? '');
         $email = filter_input(INPUT_POST, 'email', FILTER_SANITIZE_EMAIL) ?: '';
@@ -55,26 +63,33 @@ class UserController
         }
 
         if ($errors !== []) {
-            $this->flashUserForm($errors, [
+            $this->handleUserFormError($errors, [
                 'full_name' => $fullName,
                 'email' => $email,
                 'cpf' => $cpf,
                 'role_id' => $roleId,
                 'is_active' => $active ? 1 : 0,
-            ], '/admin/users/create');
+            ], '/admin/users/create', $isAjax);
         }
 
         try {
-            $this->userService->createUser($fullName, $email, $cpf, $password, $roleId, $active, (int) $admin->id);
+            $user = $this->userService->createUser($fullName, $email, $cpf, $password, $roleId, $active, (int) $admin->id);
         } catch (PDOException $exception) {
             $errors[] = 'Não foi possível criar o usuário. Verifique se e-mail ou CPF já estão cadastrados.';
-            $this->flashUserForm($errors, [
+            $this->handleUserFormError($errors, [
                 'full_name' => $fullName,
                 'email' => $email,
                 'cpf' => $cpf,
                 'role_id' => $roleId,
                 'is_active' => $active ? 1 : 0,
-            ], '/admin/users/create');
+            ], '/admin/users/create', $isAjax);
+        }
+
+        if ($isAjax) {
+            json_response([
+                'message' => 'Usuário criado com sucesso.',
+                'user' => $user,
+            ]);
         }
 
         set_flash('admin_status', 'Usuário criado com sucesso.');
@@ -104,6 +119,7 @@ class UserController
     public function update(int $userId): void
     {
         $admin = require_role('admin');
+        $isAjax = is_ajax();
 
         $fullName = trim($_POST['full_name'] ?? '');
         $email = filter_input(INPUT_POST, 'email', FILTER_SANITIZE_EMAIL) ?: '';
@@ -120,13 +136,13 @@ class UserController
         }
 
         if ($errors !== []) {
-            $this->flashUserForm($errors, [
+            $this->handleUserFormError($errors, [
                 'full_name' => $fullName,
                 'email' => $email,
                 'cpf' => $cpf,
                 'role_id' => $roleId,
                 'is_active' => $active,
-            ], '/admin/users/' . $userId . '/edit');
+            ], '/admin/users/' . $userId . '/edit', $isAjax);
         }
 
         try {
@@ -142,13 +158,21 @@ class UserController
             );
         } catch (PDOException $exception) {
             $errors[] = 'Não foi possível atualizar o usuário. Verifique se e-mail ou CPF já estão cadastrados.';
-            $this->flashUserForm($errors, [
+            $this->handleUserFormError($errors, [
                 'full_name' => $fullName,
                 'email' => $email,
                 'cpf' => $cpf,
                 'role_id' => $roleId,
                 'is_active' => $active,
-            ], '/admin/users/' . $userId . '/edit');
+            ], '/admin/users/' . $userId . '/edit', $isAjax);
+        }
+
+        if ($isAjax) {
+            $user = $this->userService->find($userId);
+            json_response([
+                'message' => 'Usuário atualizado com sucesso.',
+                'user' => $user,
+            ]);
         }
 
         set_flash('admin_status', 'Usuário atualizado com sucesso.');
@@ -158,13 +182,23 @@ class UserController
     public function destroy(int $userId): void
     {
         $admin = require_role('admin');
+        $isAjax = is_ajax();
 
         if ((int) $admin->id === $userId) {
+            if ($isAjax) {
+                json_response(['message' => 'Você não pode remover sua própria conta.'], 422);
+            }
+
             set_flash('admin_error', 'Você não pode remover sua própria conta.');
             redirect('/admin/users');
         }
 
         $this->userService->deleteUser($userId, (int) $admin->id);
+
+        if ($isAjax) {
+            json_response(['message' => 'Usuário removido com sucesso.']);
+        }
+
         set_flash('admin_status', 'Usuário removido com sucesso.');
         redirect('/admin/users');
     }
@@ -204,8 +238,12 @@ class UserController
         return $errors;
     }
 
-    private function flashUserForm(array $errors, array $old, string $redirectTo): void
+    private function handleUserFormError(array $errors, array $old, string $redirectTo, bool $ajax): void
     {
+        if ($ajax) {
+            json_response(['errors' => $errors], 422);
+        }
+
         set_flash('user_form_errors', $errors);
         set_flash('user_form_old', $old);
         redirect($redirectTo);

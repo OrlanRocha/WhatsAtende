@@ -1,37 +1,32 @@
 <?php
 /** @var array<int, array<string, mixed>> $logs */
 /** @var string|null $level */
+$pageTitle = 'Logs · WhatsAtende';
+include base_path('app/Views/partials/layout-start.php');
+include base_path('app/Views/admin/partials/nav.php');
 ?>
-<!doctype html>
-<html lang="pt-BR">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Logs · WhatsAtende</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
-</head>
-<body class="bg-light">
-<?php include base_path('app/Views/admin/partials/nav.php'); ?>
-<div class="container py-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1 class="h3 mb-0">Logs do sistema</h1>
-        <form class="d-flex align-items-center gap-2" method="GET" action="/admin/logs">
-            <label for="level" class="form-label mb-0">Filtro:</label>
-            <select name="level" id="level" class="form-select form-select-sm" onchange="this.form.submit()">
+<div class="container-xxl py-4" id="logs-page">
+    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-start align-items-lg-center gap-3 mb-4">
+        <div>
+            <h1 class="h3 fw-semibold mb-1">Observabilidade do sistema</h1>
+            <p class="text-muted mb-0">Acompanhe autenticações, integrações e ações críticas realizadas pelos usuários.</p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <label for="log-level" class="form-label mb-0">Nível</label>
+            <select id="log-level" class="form-select form-select-sm" data-filter>
                 <option value="">Todos</option>
-                <option value="info" <?= $level === 'info' ? 'selected' : '' ?>>Info</option>
-                <option value="warning" <?= $level === 'warning' ? 'selected' : '' ?>>Alerta</option>
-                <option value="error" <?= $level === 'error' ? 'selected' : '' ?>>Erro</option>
-                <option value="critical" <?= $level === 'critical' ? 'selected' : '' ?>>Crítico</option>
+                <option value="info" <?= $level === 'info' ? 'selected' : '' ?>>Informações</option>
+                <option value="warning" <?= $level === 'warning' ? 'selected' : '' ?>>Alertas</option>
+                <option value="error" <?= $level === 'error' ? 'selected' : '' ?>>Erros</option>
+                <option value="critical" <?= $level === 'critical' ? 'selected' : '' ?>>Críticos</option>
             </select>
-        </form>
+        </div>
     </div>
-    <div class="card shadow-sm">
+    <div class="card shadow-sm border-0">
         <div class="card-body p-0">
             <div class="table-responsive">
-                <table class="table align-middle mb-0">
-                    <thead class="table-light">
+                <table class="table align-middle mb-0" id="logs-table" data-table>
+                    <thead>
                     <tr>
                         <th>Data</th>
                         <th>Nível</th>
@@ -52,16 +47,14 @@
                             <td><?= htmlspecialchars((string) ($log['ip_address'] ?? '-')) ?></td>
                         </tr>
                     <?php endforeach; ?>
-                    <?php if (empty($logs)): ?>
-                        <tr>
-                            <td colspan="6" class="text-center text-muted py-4">Nenhum registro encontrado.</td>
-                        </tr>
-                    <?php endif; ?>
                     </tbody>
                 </table>
             </div>
         </div>
     </div>
 </div>
-</body>
-</html>
+<script type="module">
+import { initLogViewer } from '/js/modules/logs.js';
+initLogViewer('#logs-page', '/admin/logs');
+</script>
+<?php include base_path('app/Views/partials/layout-end.php'); ?>

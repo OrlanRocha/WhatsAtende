@@ -1,90 +1,68 @@
 <?php
-
-declare(strict_types=1);
-
+/** @var array<int, array<string, mixed>> $queue */
 $status = get_flash('auth_status');
 $error = get_flash('auth_error');
-$user = auth();
-
-?><!doctype html>
-<html lang="pt-BR">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Fila de Chamados</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body class="bg-light">
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="/tickets">WhatsAtende</a>
-        <div class="d-flex align-items-center gap-3">
-            <?php if ($user && ($user->role ?? null) === 'admin'): ?>
-                <a class="btn btn-outline-light btn-sm" href="/admin">Dashboard</a>
-            <?php endif; ?>
-            <?php if ($user): ?>
-                <span class="text-light small">Olá, <?= htmlspecialchars($user->full_name ?? '') ?></span>
-                <form method="POST" action="/logout" class="m-0">
-                    <button type="submit" class="btn btn-outline-light btn-sm">Sair</button>
-                </form>
-            <?php endif; ?>
+$pageTitle = 'Fila de Chamados · WhatsAtende';
+include base_path('app/Views/partials/layout-start.php');
+include base_path('app/Views/partials/topbar.php');
+?>
+<div class="container-xxl py-4" id="queue-page">
+    <div class="alert-stack mb-3">
+        <?php if (!empty($status)): ?>
+            <div class="alert alert-success shadow-sm" role="alert"><?= htmlspecialchars($status) ?></div>
+        <?php endif; ?>
+        <?php if (!empty($error)): ?>
+            <div class="alert alert-danger shadow-sm" role="alert"><?= htmlspecialchars($error) ?></div>
+        <?php endif; ?>
+    </div>
+    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-start align-items-lg-center gap-3 mb-4">
+        <div>
+            <h1 class="h3 fw-semibold mb-1">Fila em tempo real</h1>
+            <p class="text-muted mb-0">Chamados aguardando atribuição atualizam automaticamente a cada 10 segundos.</p>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-outline-secondary" data-refresh-queue>
+                <i class="bi bi-arrow-clockwise"></i> Atualizar agora
+            </button>
         </div>
     </div>
-</nav>
-<div class="container py-4">
-    <?php if (!empty($status)): ?>
-        <div class="alert alert-success alert-dismissible fade show" role="alert">
-            <?= htmlspecialchars($status) ?>
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fechar"></button>
-        </div>
-    <?php endif; ?>
-    <?php if (!empty($error)): ?>
-        <div class="alert alert-danger alert-dismissible fade show" role="alert">
-            <?= htmlspecialchars($error) ?>
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fechar"></button>
-        </div>
-    <?php endif; ?>
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1 class="h3 mb-0">Fila de Chamados</h1>
-        <a class="btn btn-primary" href="/tickets">Atualizar</a>
-    </div>
-    <?php if (empty($queue)): ?>
-        <div class="alert alert-info">Nenhum chamado aguardando atendimento.</div>
-    <?php else: ?>
-        <div class="table-responsive shadow-sm rounded">
-            <table class="table table-hover mb-0 align-middle">
-                <thead class="table-light">
-                <tr>
-                    <th>Protocolo</th>
-                    <th>Contato</th>
-                    <th>Canal</th>
-                    <th>Status</th>
-                    <th>Aberto em</th>
-                    <th></th>
-                </tr>
-                </thead>
-                <tbody>
-                <?php foreach ($queue as $ticket): ?>
+    <div class="card shadow-sm border-0">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table align-middle mb-0" id="queue-table" data-table>
+                    <thead>
                     <tr>
-                        <td>#<?= htmlspecialchars((string) ($ticket['id'] ?? '')); ?></td>
-                        <td><?= htmlspecialchars((string) ($ticket['contact_name'] ?? '')); ?></td>
-                        <td><?= htmlspecialchars((string) ($ticket['channel'] ?? 'whatsapp')); ?></td>
-                        <td>
-                            <span class="badge text-bg-secondary text-capitalize">
-                                <?= htmlspecialchars((string) ($ticket['status'] ?? 'open')); ?>
-                            </span>
-                        </td>
-                        <td><?= htmlspecialchars((string) ($ticket['opened_at'] ?? '')); ?></td>
-                        <td class="text-end">
-                            <a class="btn btn-sm btn-success" href="/tickets/<?= urlencode((string) ($ticket['id'] ?? '')); ?>">Iniciar atendimento</a>
-                        </td>
+                        <th>Protocolo</th>
+                        <th>Contato</th>
+                        <th>Canal</th>
+                        <th>Status</th>
+                        <th>Aberto em</th>
+                        <th class="text-end">Ações</th>
                     </tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                    <?php foreach ($queue as $ticket): ?>
+                        <tr>
+                            <td>#<?= htmlspecialchars((string) ($ticket['id'] ?? '')) ?></td>
+                            <td><?= htmlspecialchars((string) ($ticket['contact_name'] ?? '')) ?></td>
+                            <td><?= htmlspecialchars((string) ($ticket['channel'] ?? 'whatsapp')) ?></td>
+                            <td><span class="badge bg-secondary text-capitalize"><?= htmlspecialchars((string) ($ticket['status'] ?? 'open')) ?></span></td>
+                            <td><?= htmlspecialchars((string) ($ticket['opened_at'] ?? '')) ?></td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-success" data-assign data-ticket="<?= htmlspecialchars((string) ($ticket['id'] ?? '')) ?>">
+                                    <i class="bi bi-headset"></i> Iniciar atendimento
+                                </button>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
         </div>
-    <?php endif; ?>
+    </div>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+<script type="module">
+import { initQueue } from '/js/modules/queue.js';
+initQueue('#queue-page', '/tickets');
+</script>
+<?php include base_path('app/Views/partials/layout-end.php'); ?>

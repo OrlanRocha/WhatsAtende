@@ -2,113 +2,108 @@
 /** @var array<int, array<string, mixed>> $templates */
 /** @var string|null $status */
 /** @var string|null $error */
-/** @var array<int, string> $formErrors */
-/** @var array<string, mixed> $old */
-$old = $old ?? [];
+$pageTitle = 'Templates · WhatsAtende';
+include base_path('app/Views/partials/layout-start.php');
+include base_path('app/Views/admin/partials/nav.php');
 ?>
-<!doctype html>
-<html lang="pt-BR">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Templates · WhatsAtende</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
-</head>
-<body class="bg-light">
-<?php include base_path('app/Views/admin/partials/nav.php'); ?>
-<div class="container py-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1 class="h3 mb-0">Templates de Mensagens</h1>
+<div class="container-xxl py-4">
+    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-start align-items-lg-center gap-3 mb-4">
+        <div>
+            <h1 class="h3 fw-semibold mb-1">Scripts e Templates</h1>
+            <p class="text-muted mb-0">Prepare respostas rápidas para padronizar o atendimento omnichannel.</p>
+        </div>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#templateModal" data-mode="create">
+            <i class="bi bi-plus-circle"></i> Novo template
+        </button>
     </div>
-    <?php if (!empty($status)): ?>
-        <div class="alert alert-success alert-dismissible fade show" role="alert">
-            <?= htmlspecialchars($status) ?>
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fechar"></button>
-        </div>
-    <?php endif; ?>
-    <?php if (!empty($error)): ?>
-        <div class="alert alert-danger alert-dismissible fade show" role="alert">
-            <?= htmlspecialchars($error) ?>
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fechar"></button>
-        </div>
-    <?php endif; ?>
-
-    <div class="row g-4">
-        <div class="col-lg-4">
-            <div class="card shadow-sm">
-                <div class="card-header">
-                    <h5 class="mb-0">Novo template</h5>
-                </div>
-                <div class="card-body">
-                    <?php if (!empty($formErrors)): ?>
-                        <div class="alert alert-danger">
-                            <ul class="mb-0 ps-3">
-                                <?php foreach ($formErrors as $formError): ?>
-                                    <li><?= htmlspecialchars($formError) ?></li>
-                                <?php endforeach; ?>
-                            </ul>
-                        </div>
-                    <?php endif; ?>
-                    <form method="POST" action="/admin/templates">
-                        <div class="mb-3">
-                            <label for="title" class="form-label">Título</label>
-                            <input type="text" class="form-control" id="title" name="title" required value="<?= htmlspecialchars((string) ($old['title'] ?? '')) ?>">
-                        </div>
-                        <div class="mb-3">
-                            <label for="category" class="form-label">Categoria</label>
-                            <input type="text" class="form-control" id="category" name="category" value="<?= htmlspecialchars((string) ($old['category'] ?? '')) ?>">
-                        </div>
-                        <div class="mb-3">
-                            <label for="body" class="form-label">Mensagem</label>
-                            <textarea class="form-control" id="body" name="body" rows="5" required><?= htmlspecialchars((string) ($old['body'] ?? '')) ?></textarea>
-                        </div>
-                        <button type="submit" class="btn btn-primary w-100">Salvar template</button>
-                    </form>
-                </div>
+    <div class="alert-stack">
+        <?php if (!empty($status)): ?>
+            <div class="alert alert-success shadow-sm" role="alert"><?= htmlspecialchars($status) ?></div>
+        <?php endif; ?>
+        <?php if (!empty($error)): ?>
+            <div class="alert alert-danger shadow-sm" role="alert"><?= htmlspecialchars($error) ?></div>
+        <?php endif; ?>
+    </div>
+    <div class="card shadow-sm border-0">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table align-middle mb-0" id="templates-table" data-table>
+                    <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Título</th>
+                        <th>Categoria</th>
+                        <th>Última atualização</th>
+                        <th class="text-end">Ações</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach ($templates as $template): ?>
+                        <tr data-template-row data-template='<?= json_encode($template, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>'>
+                            <td><?= (int) ($template['id'] ?? 0) ?></td>
+                            <td class="fw-semibold"><?= htmlspecialchars((string) ($template['title'] ?? '')) ?></td>
+                            <td><span class="badge rounded-pill bg-secondary-subtle text-dark text-capitalize"><?= htmlspecialchars((string) ($template['category'] ?? 'geral')) ?></span></td>
+                            <td><?= htmlspecialchars(isset($template['updated_at']) ? date('d/m/Y H:i', strtotime((string) $template['updated_at'])) : '') ?></td>
+                            <td class="text-end">
+                                <div class="btn-group" role="group">
+                                    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#templateModal" data-mode="edit">
+                                        <i class="bi bi-pencil-square"></i>
+                                    </button>
+                                    <form method="POST" action="/admin/templates/<?= urlencode((string) ($template['id'] ?? '')) ?>/delete" class="d-inline" data-ajax data-confirm="Excluir este template?" data-success-event="templates:refresh">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
             </div>
-        </div>
-        <div class="col-lg-8">
-            <?php if (empty($templates)): ?>
-                <div class="alert alert-info">Nenhum template cadastrado.</div>
-            <?php endif; ?>
-            <?php foreach ($templates as $template): ?>
-                <div class="card shadow-sm mb-3">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <div>
-                            <h5 class="mb-0"><?= htmlspecialchars((string) ($template['title'] ?? '')) ?></h5>
-                            <small class="text-muted text-capitalize">Categoria: <?= htmlspecialchars((string) ($template['category'] ?? 'Geral')) ?></small>
-                        </div>
-                        <form method="POST" action="/admin/templates/<?= urlencode((string) ($template['id'] ?? '')) ?>/delete" onsubmit="return confirm('Deseja remover este template?');">
-                            <button type="submit" class="btn btn-sm btn-outline-danger">Excluir</button>
-                        </form>
-                    </div>
-                    <div class="card-body">
-                        <form method="POST" action="/admin/templates/<?= urlencode((string) ($template['id'] ?? '')) ?>" class="row g-3 align-items-end">
-                            <div class="col-md-6">
-                                <label class="form-label">Título</label>
-                                <input type="text" name="title" class="form-control" required value="<?= htmlspecialchars((string) ($template['title'] ?? '')) ?>">
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">Categoria</label>
-                                <input type="text" name="category" class="form-control" value="<?= htmlspecialchars((string) ($template['category'] ?? '')) ?>">
-                            </div>
-                            <div class="col-12">
-                                <label class="form-label">Mensagem</label>
-                                <textarea name="body" class="form-control" rows="4" required><?= htmlspecialchars((string) ($template['body'] ?? '')) ?></textarea>
-                            </div>
-                            <div class="col-12 text-end">
-                                <button type="submit" class="btn btn-outline-primary">Atualizar</button>
-                            </div>
-                        </form>
-                        <?php if (!empty($template['author'])): ?>
-                            <p class="text-muted small mt-3 mb-0">Criado por <?= htmlspecialchars((string) $template['author']) ?> em <?= htmlspecialchars(date('d/m/Y H:i', strtotime($template['created_at'] ?? 'now'))) ?></p>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            <?php endforeach; ?>
         </div>
     </div>
 </div>
-</body>
-</html>
+
+<div class="modal fade" id="templateModal" tabindex="-1" aria-labelledby="templateModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header">
+                <h5 class="modal-title" id="templateModalLabel">Novo template</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+            </div>
+            <form method="POST" action="/admin/templates" data-ajax data-hide-modal="#templateModal" data-success-event="templates:refresh" data-reset="true" id="templateForm">
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-lg-6">
+                            <label class="form-label" for="template_title">Título</label>
+                            <input type="text" class="form-control" id="template_title" name="title" required>
+                        </div>
+                        <div class="col-lg-6">
+                            <label class="form-label" for="template_category">Categoria</label>
+                            <input type="text" class="form-control" id="template_category" name="category" placeholder="Boas-vindas, Follow-up, ...">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label" for="template_body">Conteúdo</label>
+                            <textarea class="form-control" id="template_body" name="body" rows="5" required></textarea>
+                            <div class="form-text">Suporta emojis, links e quebras de linha.</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-floppy"></i> Salvar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+import { initTemplateModal, refreshTemplateTable } from '/js/modules/templates.js';
+initTemplateModal('#templateModal', '#templateForm');
+window.addEventListener('templates:refresh', () => refreshTemplateTable('#templates-table', '/admin/templates'));
+</script>
+<?php include base_path('app/Views/partials/layout-end.php'); ?>

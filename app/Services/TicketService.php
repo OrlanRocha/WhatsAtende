@@ -12,7 +12,9 @@ class TicketService
 {
     public function __construct(
         private PDO $connection,
-        private LoggerService $logger
+        private LoggerService $logger,
+        private SettingService $settings,
+        private EvolutionService $evolution
     ) {
     }
 
@@ -53,6 +55,14 @@ class TicketService
             'assigned_user_id' => $userId,
             'message' => 'Chamado atribuído ao atendente.',
         ]);
+
+        $integration = $this->settings->integrationSettings();
+        if (($integration['integration_mode'] ?? 'webhook') === 'native') {
+            $contactExternalId = $this->getContactExternalId($ticketId);
+            if ($contactExternalId) {
+                $this->evolution->sendDefaultTemplate($contactExternalId);
+            }
+        }
     }
 
     /**
@@ -114,6 +124,14 @@ class TicketService
             'user_id' => $userId,
             'message' => 'Mensagem do atendente registrada.',
         ]);
+
+        $integration = $this->settings->integrationSettings();
+        if (($integration['integration_mode'] ?? 'webhook') === 'native') {
+            $contactExternalId = $this->getContactExternalId($ticketId);
+            if ($contactExternalId) {
+                $this->evolution->sendText($contactExternalId, $body);
+            }
+        }
     }
 
     public function resolveTicket(int $ticketId): void
@@ -182,5 +200,16 @@ class TicketService
         $stmt->execute();
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    private function getContactExternalId(int $ticketId): ?string
+    {
+        $stmt = $this->connection->prepare(
+            'SELECT c.external_id FROM tickets t INNER JOIN contacts c ON c.id = t.contact_id WHERE t.id = :id'
+        );
+        $stmt->execute(['id' => $ticketId]);
+        $externalId = $stmt->fetchColumn();
+
+        return $externalId !== false ? (string) $externalId : null;
     }
 }

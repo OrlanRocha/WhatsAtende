@@ -135,3 +135,22 @@ function get_flash(string $key, mixed $default = null): mixed
 
     return $value;
 }
+
+function is_ajax(): bool
+{
+    $requestedWith = $_SERVER['HTTP_X_REQUESTED_WITH'] ?? '';
+    if (strtolower($requestedWith) === 'xmlhttprequest') {
+        return true;
+    }
+
+    $accept = $_SERVER['HTTP_ACCEPT'] ?? '';
+    return str_contains(strtolower($accept), 'application/json');
+}
+
+function json_response(array $data, int $status = 200): void
+{
+    http_response_code($status);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
+}
