@@ -28,9 +28,34 @@ spl_autoload_register(static function (string $class): void {
 /** @var array<string, mixed> $databaseConfig */
 $databaseConfig = config('database.php');
 
-$container = [];
+$GLOBALS['container'] = [];
 
-$container[\PDO::class] = static function () use ($databaseConfig): \PDO {
+if (!function_exists('container_bind')) {
+    function container_bind(string $abstract, callable|object $concrete): void
+    {
+        $GLOBALS['container'][$abstract] = $concrete;
+    }
+}
+
+if (!function_exists('resolve')) {
+    function resolve(string $abstract): mixed
+    {
+        if (!array_key_exists($abstract, $GLOBALS['container'])) {
+            throw new \InvalidArgumentException("Service {$abstract} is not bound in the container.");
+        }
+
+        $entry = $GLOBALS['container'][$abstract];
+
+        if (is_callable($entry)) {
+            $entry = $entry();
+            $GLOBALS['container'][$abstract] = $entry;
+        }
+
+        return $entry;
+    }
+}
+
+container_bind(\PDO::class, static function () use ($databaseConfig): \PDO {
     $dsn = sprintf(
         '%s:host=%s;port=%d;dbname=%s;charset=%s',
         $databaseConfig['driver'],
@@ -45,33 +70,15 @@ $container[\PDO::class] = static function () use ($databaseConfig): \PDO {
     $pdo->setAttribute(\PDO::ATTR_DEFAULT_FETCH_MODE, \PDO::FETCH_ASSOC);
 
     return $pdo;
-};
+});
 
-$container[LoggerService::class] = static fn () => new LoggerService(resolve(\PDO::class));
-$container[AuthService::class] = static fn () => new AuthService(resolve(\PDO::class), resolve(LoggerService::class));
-$container[TicketService::class] = static fn () => new TicketService(resolve(\PDO::class), resolve(LoggerService::class));
-$container[WebhookService::class] = static fn () => new WebhookService(resolve(\PDO::class), resolve(LoggerService::class));
-$container[AuthController::class] = static fn () => new AuthController(resolve(AuthService::class));
-$container[TicketController::class] = static fn () => new TicketController(resolve(TicketService::class), resolve(LoggerService::class));
-$container[WebhookController::class] = static fn () => new WebhookController(resolve(WebhookService::class));
-
-function resolve(string $abstract): mixed
-{
-    global $container;
-
-    if (!array_key_exists($abstract, $container)) {
-        throw new \InvalidArgumentException("Service {$abstract} is not bound in the container.");
-    }
-
-    $entry = $container[$abstract];
-
-    if (is_callable($entry)) {
-        $entry = $entry();
-        $container[$abstract] = $entry;
-    }
-
-    return $entry;
-}
+container_bind(LoggerService::class, static fn () => new LoggerService(resolve(\PDO::class)));
+container_bind(AuthService::class, static fn () => new AuthService(resolve(\PDO::class), resolve(LoggerService::class)));
+container_bind(TicketService::class, static fn () => new TicketService(resolve(\PDO::class), resolve(LoggerService::class)));
+container_bind(WebhookService::class, static fn () => new WebhookService(resolve(\PDO::class), resolve(LoggerService::class)));
+container_bind(AuthController::class, static fn () => new AuthController(resolve(AuthService::class)));
+container_bind(TicketController::class, static fn () => new TicketController(resolve(TicketService::class), resolve(LoggerService::class)));
+container_bind(WebhookController::class, static fn () => new WebhookController(resolve(WebhookService::class)));
 
 $routes = require base_path('routes/web.php');
 
