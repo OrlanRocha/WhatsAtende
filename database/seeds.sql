@@ -144,7 +144,11 @@ INSERT INTO settings (
     (1, 'webhook_url', 'https://seu-dominio.com/api/webhook', 'Endpoint exposto para Evolution API ou n8n.', 1, NOW()),
     (2, 'webhook_token', 'changeme-token', 'Token utilizado para validar chamadas recebidas.', 1, NOW()),
     (3, 'integration_mode', 'webhook', 'Modo padrão de integração do sistema.', 1, NOW()),
-    (4, 'evolution_default_template', 'Olá! Recebemos sua mensagem e em instantes um atendente continuará o atendimento.', 'Texto automático utilizado ao iniciar um atendimento nativo.', 1, NOW())
+    (4, 'evolution_default_template', 'Olá! Recebemos sua mensagem e em instantes um atendente continuará o atendimento.', 'Texto automático utilizado ao iniciar um atendimento nativo.', 1, NOW()),
+    (5, 'evolution_api_url', 'http://127.0.0.1:8080', 'Endpoint base sugerido para a Evolution API nativa.', 1, NOW()),
+    (6, 'evolution_instance', 'W001', 'Instância de exemplo utilizada nos testes locais.', 1, NOW()),
+    (7, 'evolution_api_key', 'changeme-api-key', 'API Key de demonstração — substitua em produção.', 1, NOW()),
+    (8, 'evolution_token', NULL, 'Token Bearer opcional para integrações legadas.', 1, NOW())
 ON DUPLICATE KEY UPDATE
     value = VALUES(value),
     description = VALUES(description),

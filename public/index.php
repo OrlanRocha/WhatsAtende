@@ -8,6 +8,7 @@ use App\Controllers\Admin\TemplateController as AdminTemplateController;
 use App\Controllers\Admin\TicketController as AdminTicketController;
 use App\Controllers\Admin\UserController as AdminUserController;
 use App\Controllers\Admin\WebhookController as AdminWebhookController;
+use App\Controllers\Api\EvolutionController as ApiEvolutionController;
 use App\Controllers\AuthController;
 use App\Controllers\TicketController;
 use App\Controllers\WebhookController;
@@ -106,6 +107,7 @@ container_bind(AdminUserController::class, static fn () => new AdminUserControll
 container_bind(AdminTemplateController::class, static fn () => new AdminTemplateController(resolve(TemplateService::class)));
 container_bind(AdminLogController::class, static fn () => new AdminLogController(resolve(LoggerService::class)));
 container_bind(AdminWebhookController::class, static fn () => new AdminWebhookController(resolve(SettingService::class), resolve(EvolutionService::class)));
+container_bind(ApiEvolutionController::class, static fn () => new ApiEvolutionController(resolve(EvolutionService::class)));
 
 $routes = require base_path('routes/web.php');
 

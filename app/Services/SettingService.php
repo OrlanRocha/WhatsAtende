@@ -32,6 +32,7 @@ class SettingService
             'webhook_token' => $this->get('webhook_token'),
             'evolution_api_url' => $this->get('evolution_api_url'),
             'evolution_instance' => $this->get('evolution_instance'),
+            'evolution_api_key' => $this->get('evolution_api_key'),
             'evolution_token' => $this->get('evolution_token'),
             'evolution_default_template' => $this->get('evolution_default_template'),
         ];
@@ -48,7 +49,8 @@ class SettingService
         } else {
             $this->set('evolution_api_url', $data['evolution_api_url'] ?? null, $userId, 'Endpoint base da Evolution API.');
             $this->set('evolution_instance', $data['evolution_instance'] ?? null, $userId, 'Instância utilizada para envio de mensagens.');
-            $this->set('evolution_token', $data['evolution_token'] ?? null, $userId, 'Token de autenticação da Evolution API.');
+            $this->set('evolution_api_key', $data['evolution_api_key'] ?? null, $userId, 'Chave API utilizada em chamadas nativas.');
+            $this->set('evolution_token', $data['evolution_token'] ?? null, $userId, 'Token Bearer opcional para cenários legados.');
             $this->set('evolution_default_template', $data['evolution_default_template'] ?? null, $userId, 'Mensagem automática inicial para atendimentos.');
         }
 

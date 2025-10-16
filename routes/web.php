@@ -6,6 +6,7 @@ use App\Controllers\Admin\TemplateController as AdminTemplateController;
 use App\Controllers\Admin\TicketController as AdminTicketController;
 use App\Controllers\Admin\UserController as AdminUserController;
 use App\Controllers\Admin\WebhookController as AdminWebhookController;
+use App\Controllers\Api\EvolutionController as ApiEvolutionController;
 use App\Controllers\AuthController;
 use App\Controllers\TicketController;
 use App\Controllers\WebhookController;
@@ -28,6 +29,14 @@ return [
     ['GET', '/admin/webhook', [AdminWebhookController::class, 'index']],
     ['POST', '/admin/webhook', [AdminWebhookController::class, 'update']],
     ['POST', '/admin/webhook/test', [AdminWebhookController::class, 'test']],
+    ['GET', '/api/evolution', [ApiEvolutionController::class, 'handle']],
+    ['POST', '/api/evolution', [ApiEvolutionController::class, 'handle']],
+    ['GET', '/api/evolution/chats', [ApiEvolutionController::class, 'chats']],
+    ['GET', '/api/evolution/messages', [ApiEvolutionController::class, 'messages']],
+    ['GET', '/api/evolution/profile', [ApiEvolutionController::class, 'profile']],
+    ['GET', '/api/evolution/media', [ApiEvolutionController::class, 'media']],
+    ['POST', '/api/evolution/messages', [ApiEvolutionController::class, 'send']],
+    ['POST', '/api/evolution/read', [ApiEvolutionController::class, 'markRead']],
     ['GET', '/login', [AuthController::class, 'showLoginForm']],
     ['POST', '/login', [AuthController::class, 'login']],
     ['POST', '/logout', [AuthController::class, 'logout']],

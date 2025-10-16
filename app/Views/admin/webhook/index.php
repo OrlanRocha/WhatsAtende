@@ -54,17 +54,23 @@ $mode = $settings['integration_mode'] ?? 'webhook';
                         <div class="integration-group" data-integration="native" <?= $mode === 'native' ? '' : 'hidden' ?>>
                             <h2 class="h6 fw-semibold mt-4">Configuração Evolução Nativa</h2>
                             <div class="row g-3">
-                                <div class="col-md-6">
+                                <div class="col-12">
                                     <label for="evolution_api_url" class="form-label">Endpoint da API</label>
                                     <input type="url" class="form-control" id="evolution_api_url" name="evolution_api_url" value="<?= htmlspecialchars((string) ($settings['evolution_api_url'] ?? '')) ?>" placeholder="https://evolution.yourdomain.com">
                                 </div>
-                                <div class="col-md-3">
+                                <div class="col-md-4">
                                     <label for="evolution_instance" class="form-label">Instância</label>
-                                    <input type="text" class="form-control" id="evolution_instance" name="evolution_instance" value="<?= htmlspecialchars((string) ($settings['evolution_instance'] ?? '')) ?>" placeholder="instance123">
+                                    <input type="text" class="form-control" id="evolution_instance" name="evolution_instance" value="<?= htmlspecialchars((string) ($settings['evolution_instance'] ?? '')) ?>" placeholder="W001">
                                 </div>
-                                <div class="col-md-3">
-                                    <label for="evolution_token" class="form-label">Token</label>
+                                <div class="col-md-4">
+                                    <label for="evolution_api_key" class="form-label">API Key</label>
+                                    <input type="text" class="form-control" id="evolution_api_key" name="evolution_api_key" value="<?= htmlspecialchars((string) ($settings['evolution_api_key'] ?? '')) ?>" placeholder="Chave fornecida pela Evolution">
+                                    <div class="form-text">Enviada no cabeçalho <code>apikey</code>.</div>
+                                </div>
+                                <div class="col-md-4">
+                                    <label for="evolution_token" class="form-label">Token Bearer (opcional)</label>
                                     <input type="text" class="form-control" id="evolution_token" name="evolution_token" value="<?= htmlspecialchars((string) ($settings['evolution_token'] ?? '')) ?>" placeholder="Seu token Evolution">
+                                    <div class="form-text">Usado em integrações legadas que exigem <code>Authorization: Bearer</code>.</div>
                                 </div>
                                 <div class="col-12">
                                     <label for="evolution_default_template" class="form-label">Mensagem automática de boas-vindas</label>

@@ -78,6 +78,7 @@ Para popular o ambiente com dados de exemplo (contas iniciais, templates e um ti
 - **Painel Responsivo:** View `atendimento.php` usa Bootstrap 5 e jQuery para chat em tempo real com suporte a mídias.
 - **Autenticação Completa:** Fluxo de login, cadastro, logout e recuperação de senha com tokens de redefinição persistidos no banco.
 - **Área Administrativa Completa:** Dashboard, CRUD de usuários, templates de mensagem, lista de solicitações, configuração do webhook Evolution/n8n e visualização de logs ficam disponíveis em `/admin`, acessível apenas para o perfil `admin`.
+- **Evolution API Nativa:** Endpoint autenticado em `/api/evolution` expõe ações de chats, mensagens, mídias e envio direto utilizando API Key/token definidos pelo administrador.
 - **Logs Centralizados:** `LoggerService` grava eventos críticos na tabela `logs`, permitindo auditoria completa e consulta filtrada diretamente na interface administrativa.
 - **Preparado para Métricas:** A tabela `ticket_metrics` facilita cálculo de tempos médios e indicadores do dashboard administrativo.
 - **Configurações Persistentes:** A tabela `settings` guarda URL/token do webhook, garantindo que somente chamadas autorizadas sejam aceitas pelo endpoint `/api/webhook`.

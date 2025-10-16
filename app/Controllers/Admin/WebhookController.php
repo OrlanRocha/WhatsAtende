@@ -41,6 +41,7 @@ class WebhookController
             'webhook_token' => trim($_POST['webhook_token'] ?? ''),
             'evolution_api_url' => trim($_POST['evolution_api_url'] ?? ''),
             'evolution_instance' => trim($_POST['evolution_instance'] ?? ''),
+            'evolution_api_key' => trim($_POST['evolution_api_key'] ?? ''),
             'evolution_token' => trim($_POST['evolution_token'] ?? ''),
             'evolution_default_template' => trim($_POST['evolution_default_template'] ?? ''),
         ];
@@ -110,8 +111,9 @@ class WebhookController
                 $errors[] = 'Informe a URL e o token do webhook.';
             }
         } else {
-            if (($data['evolution_api_url'] ?? '') === '' || ($data['evolution_instance'] ?? '') === '' || ($data['evolution_token'] ?? '') === '') {
-                $errors[] = 'Informe endpoint, instância e token da Evolution API.';
+            $hasCredentials = ($data['evolution_token'] ?? '') !== '' || ($data['evolution_api_key'] ?? '') !== '';
+            if (($data['evolution_api_url'] ?? '') === '' || ($data['evolution_instance'] ?? '') === '' || !$hasCredentials) {
+                $errors[] = 'Informe endpoint, instância e ao menos uma credencial (API Key ou token) da Evolution API.';
             }
         }
 
