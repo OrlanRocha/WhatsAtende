@@ -2,12 +2,22 @@
 
 declare(strict_types=1);
 
+use App\Controllers\Admin\DashboardController as AdminDashboardController;
+use App\Controllers\Admin\LogController as AdminLogController;
+use App\Controllers\Admin\TemplateController as AdminTemplateController;
+use App\Controllers\Admin\TicketController as AdminTicketController;
+use App\Controllers\Admin\UserController as AdminUserController;
+use App\Controllers\Admin\WebhookController as AdminWebhookController;
 use App\Controllers\AuthController;
 use App\Controllers\TicketController;
 use App\Controllers\WebhookController;
 use App\Services\AuthService;
+use App\Services\DashboardService;
 use App\Services\LoggerService;
+use App\Services\SettingService;
+use App\Services\TemplateService;
 use App\Services\TicketService;
+use App\Services\UserService;
 use App\Services\WebhookService;
 
 session_start();
@@ -74,11 +84,21 @@ container_bind(\PDO::class, static function () use ($databaseConfig): \PDO {
 
 container_bind(LoggerService::class, static fn () => new LoggerService(resolve(\PDO::class)));
 container_bind(AuthService::class, static fn () => new AuthService(resolve(\PDO::class), resolve(LoggerService::class)));
+container_bind(DashboardService::class, static fn () => new DashboardService(resolve(\PDO::class)));
+container_bind(UserService::class, static fn () => new UserService(resolve(\PDO::class), resolve(LoggerService::class)));
+container_bind(TemplateService::class, static fn () => new TemplateService(resolve(\PDO::class), resolve(LoggerService::class)));
+container_bind(SettingService::class, static fn () => new SettingService(resolve(\PDO::class), resolve(LoggerService::class)));
 container_bind(TicketService::class, static fn () => new TicketService(resolve(\PDO::class), resolve(LoggerService::class)));
 container_bind(WebhookService::class, static fn () => new WebhookService(resolve(\PDO::class), resolve(LoggerService::class)));
 container_bind(AuthController::class, static fn () => new AuthController(resolve(AuthService::class)));
 container_bind(TicketController::class, static fn () => new TicketController(resolve(TicketService::class), resolve(LoggerService::class)));
-container_bind(WebhookController::class, static fn () => new WebhookController(resolve(WebhookService::class)));
+container_bind(WebhookController::class, static fn () => new WebhookController(resolve(WebhookService::class), resolve(SettingService::class)));
+container_bind(AdminDashboardController::class, static fn () => new AdminDashboardController(resolve(DashboardService::class), resolve(TicketService::class)));
+container_bind(AdminTicketController::class, static fn () => new AdminTicketController(resolve(TicketService::class)));
+container_bind(AdminUserController::class, static fn () => new AdminUserController(resolve(UserService::class)));
+container_bind(AdminTemplateController::class, static fn () => new AdminTemplateController(resolve(TemplateService::class)));
+container_bind(AdminLogController::class, static fn () => new AdminLogController(resolve(LoggerService::class)));
+container_bind(AdminWebhookController::class, static fn () => new AdminWebhookController(resolve(SettingService::class)));
 
 $routes = require base_path('routes/web.php');
 

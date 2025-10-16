@@ -10,8 +10,8 @@ $status = get_flash('auth_status');
 <head>
     <meta charset="UTF-8">
     <title>Painel de Atendimento</title>
-    <link href="/public/css/bootstrap.min.css" rel="stylesheet">
-    <script src="/public/js/bootstrap.bundle.min.js" defer></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <style>
         body { background-color: #f4f6f9; }
@@ -29,6 +29,9 @@ $status = get_flash('auth_status');
     <div class="container-fluid">
         <a class="navbar-brand" href="/tickets">WhatsAtende</a>
         <div class="d-flex align-items-center gap-3">
+            <?php if ($user && ($user->role ?? null) === 'admin'): ?>
+                <a class="btn btn-outline-light btn-sm" href="/admin">Dashboard</a>
+            <?php endif; ?>
             <?php if ($user): ?>
                 <span class="text-light small"><?= htmlspecialchars($user->full_name ?? '') ?></span>
                 <form method="POST" action="/logout" class="m-0">

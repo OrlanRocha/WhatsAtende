@@ -38,4 +38,30 @@ class LoggerService
             'ip_address' => $context['ip_address'] ?? null,
         ]);
     }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function latest(int $limit = 50, ?string $level = null): array
+    {
+        $sql = 'SELECT l.*, u.full_name AS user_name FROM logs l '
+            . 'LEFT JOIN users u ON u.id = l.user_id';
+
+        $params = [];
+        if ($level !== null && $level !== '') {
+            $sql .= ' WHERE l.level = :level';
+            $params['level'] = $level;
+        }
+
+        $sql .= ' ORDER BY l.created_at DESC LIMIT :limit';
+
+        $stmt = $this->connection->prepare($sql);
+        if (isset($params['level'])) {
+            $stmt->bindValue(':level', $params['level']);
+        }
+        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
 }

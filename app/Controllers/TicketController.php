@@ -53,6 +53,11 @@ class TicketController
     public function assign(int $ticketId): void
     {
         $user = require_auth();
+        if (!in_array($user->role ?? null, ['admin', 'agent'], true)) {
+            http_response_code(403);
+            echo 'Acesso restrito a atendentes.';
+            return;
+        }
         $userId = (int) $user->id;
         $this->ticketService->assignToUser($ticketId, $userId);
 
@@ -62,6 +67,12 @@ class TicketController
     public function storeMessage(int $ticketId): void
     {
         $user = require_auth();
+        if (!in_array($user->role ?? null, ['admin', 'agent'], true)) {
+            http_response_code(403);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'Acesso restrito a atendentes.']);
+            return;
+        }
         $body = trim($_POST['message'] ?? '');
         if ($body === '') {
             http_response_code(422);
@@ -96,7 +107,12 @@ class TicketController
 
     public function resolve(int $ticketId): void
     {
-        require_auth();
+        $user = require_auth();
+        if (!in_array($user->role ?? null, ['admin', 'agent'], true)) {
+            http_response_code(403);
+            echo 'Acesso restrito a atendentes.';
+            return;
+        }
         $this->ticketService->resolveTicket($ticketId);
         redirect('/tickets');
     }

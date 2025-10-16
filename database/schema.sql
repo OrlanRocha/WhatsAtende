@@ -136,6 +136,17 @@ CREATE TABLE IF NOT EXISTS password_resets (
     UNIQUE KEY uq_password_resets_token (token_hash)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS settings (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `key` VARCHAR(120) NOT NULL UNIQUE,
+    value TEXT NULL,
+    description VARCHAR(255) NULL,
+    updated_by BIGINT UNSIGNED NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_settings_updated_by FOREIGN KEY (updated_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE INDEX idx_tickets_status ON tickets(status);
 CREATE INDEX idx_tickets_assigned_user ON tickets(assigned_user_id);
 CREATE INDEX idx_messages_ticket_sent_at ON messages(ticket_id, sent_at);

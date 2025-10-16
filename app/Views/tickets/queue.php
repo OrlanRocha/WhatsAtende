@@ -19,6 +19,9 @@ $user = auth();
     <div class="container-fluid">
         <a class="navbar-brand" href="/tickets">WhatsAtende</a>
         <div class="d-flex align-items-center gap-3">
+            <?php if ($user && ($user->role ?? null) === 'admin'): ?>
+                <a class="btn btn-outline-light btn-sm" href="/admin">Dashboard</a>
+            <?php endif; ?>
             <?php if ($user): ?>
                 <span class="text-light small">Olá, <?= htmlspecialchars($user->full_name ?? '') ?></span>
                 <form method="POST" action="/logout" class="m-0">

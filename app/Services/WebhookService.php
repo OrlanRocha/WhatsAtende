@@ -153,6 +153,12 @@ class WebhookService
             'INSERT INTO ticket_metrics (ticket_id, first_response_at) VALUES (:ticket_id, NULL)'
         )->execute(['ticket_id' => $newTicketId]);
 
+        $this->logger->info('ticket.created_from_webhook', [
+            'ticket_id' => $newTicketId,
+            'contact_id' => $contactId,
+            'message' => 'Novo ticket criado a partir do webhook.',
+        ]);
+
         return $newTicketId;
     }
 }

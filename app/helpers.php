@@ -74,6 +74,33 @@ function require_auth(): object
     return $user;
 }
 
+function has_role(string ...$roles): bool
+{
+    $user = auth();
+    if ($user === null) {
+        return false;
+    }
+
+    if ($roles === []) {
+        return true;
+    }
+
+    return in_array($user->role ?? null, $roles, true);
+}
+
+function require_role(string ...$roles): object
+{
+    $user = require_auth();
+
+    if ($roles !== [] && !in_array($user->role ?? null, $roles, true)) {
+        http_response_code(403);
+        echo 'Acesso negado.';
+        exit;
+    }
+
+    return $user;
+}
+
 function login_user(array $user): void
 {
     $_SESSION['auth_user'] = [

@@ -132,3 +132,19 @@ INSERT INTO logs (
 ON DUPLICATE KEY UPDATE
     message = VALUES(message),
     created_at = NOW();
+
+INSERT INTO settings (
+    id,
+    `key`,
+    value,
+    description,
+    updated_by,
+    updated_at
+) VALUES
+    (1, 'webhook_url', 'https://seu-dominio.com/api/webhook', 'Endpoint exposto para Evolution API ou n8n.', 1, NOW()),
+    (2, 'webhook_token', 'changeme-token', 'Token utilizado para validar chamadas recebidas.', 1, NOW())
+ON DUPLICATE KEY UPDATE
+    value = VALUES(value),
+    description = VALUES(description),
+    updated_by = VALUES(updated_by),
+    updated_at = NOW();

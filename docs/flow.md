@@ -36,3 +36,7 @@
 9. **Autenticação e Recuperação de Acesso**
    - Todo acesso ao painel passa por `AuthController`, que expõe rotas para login, cadastro e logout utilizando o `AuthService`.
    - Tokens de redefinição são gerados e armazenados em `password_resets`, permitindo o fluxo "Esqueci minha senha" com verificação de expiração e auditoria via `LoggerService`.
+
+10. **Gestão Administrativa**
+    - O administrador acessa o dashboard (`/admin`) para monitorar métricas, fila em tempo real e desempenho dos agentes.
+    - CRUD de usuários, manutenção de templates, configuração do webhook e visualização de logs dedicados ficam centralizados em controllers no namespace `Admin`, todos protegidos por `require_role('admin')`.

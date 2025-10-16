@@ -8,6 +8,13 @@ Este repositório contém a proposta de arquitetura para o sistema de atendiment
 app/
   helpers.php
   Controllers/
+    Admin/
+      DashboardController.php
+      LogController.php
+      TemplateController.php
+      TicketController.php
+      UserController.php
+      WebhookController.php
     AuthController.php
     TicketController.php
     WebhookController.php
@@ -15,10 +22,23 @@ app/
     Ticket.php
   Services/
     AuthService.php
+    DashboardService.php
     LoggerService.php
+    SettingService.php
     TicketService.php
+    TemplateService.php
+    UserService.php
     WebhookService.php
   Views/
+    admin/
+      dashboard.php
+      logs/index.php
+      partials/nav.php
+      templates/index.php
+      tickets/index.php
+      users/form.php
+      users/index.php
+      webhook/index.php
     auth/
       forgot.php
       login.php
@@ -43,7 +63,7 @@ routes/
 
 ## Schema do Banco de Dados
 
-O arquivo [`database/schema.sql`](database/schema.sql) traz o SQL completo para criação das tabelas `users`, `roles`, `contacts`, `tickets`, `ticket_metrics`, `messages`, `templates`, `logs` e `webhook_events`, com índices e relacionamentos adequados ao MariaDB.
+O arquivo [`database/schema.sql`](database/schema.sql) traz o SQL completo para criação das tabelas `users`, `roles`, `contacts`, `tickets`, `ticket_metrics`, `messages`, `templates`, `logs`, `settings` e `webhook_events`, com índices e relacionamentos adequados ao MariaDB.
 
 Para popular o ambiente com dados de exemplo (contas iniciais, templates e um ticket demonstrativo), execute também [`database/seeds.sql`](database/seeds.sql) após criar o schema.
 
@@ -53,12 +73,14 @@ Para popular o ambiente com dados de exemplo (contas iniciais, templates e um ti
 
 ## Pontos de Destaque
 
-- **MVC + Services:** Controllers finos que delegam lógica de negócio para serviços (`TicketService`, `WebhookService`).
+- **MVC + Services:** Controllers finos que delegam lógica de negócio para serviços (`TicketService`, `UserService`, `TemplateService`, `WebhookService`).
 - **Webhook Resiliente:** Armazenamento do payload bruto, idempotência via chave única e transação para garantir consistência.
 - **Painel Responsivo:** View `atendimento.php` usa Bootstrap 5 e jQuery para chat em tempo real com suporte a mídias.
 - **Autenticação Completa:** Fluxo de login, cadastro, logout e recuperação de senha com tokens de redefinição persistidos no banco.
-- **Logs Centralizados:** `LoggerService` grava eventos críticos na tabela `logs`, permitindo auditoria completa.
+- **Área Administrativa Completa:** Dashboard, CRUD de usuários, templates de mensagem, lista de solicitações, configuração do webhook Evolution/n8n e visualização de logs ficam disponíveis em `/admin`, acessível apenas para o perfil `admin`.
+- **Logs Centralizados:** `LoggerService` grava eventos críticos na tabela `logs`, permitindo auditoria completa e consulta filtrada diretamente na interface administrativa.
 - **Preparado para Métricas:** A tabela `ticket_metrics` facilita cálculo de tempos médios e indicadores do dashboard administrativo.
+- **Configurações Persistentes:** A tabela `settings` guarda URL/token do webhook, garantindo que somente chamadas autorizadas sejam aceitas pelo endpoint `/api/webhook`.
 
 ## Fluxo de Dados
 
