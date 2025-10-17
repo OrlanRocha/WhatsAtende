@@ -6,6 +6,7 @@ namespace App\Controllers;
 
 use App\Services\LoggerService;
 use App\Services\TicketService;
+use DateTimeImmutable;
 use RuntimeException;
 use Throwable;
 
@@ -28,6 +29,34 @@ class TicketController
 
         view('tickets/queue', [
             'queue' => $queue,
+            'pageId' => 'queue-page',
+            'queueTitle' => 'Fila em tempo real',
+            'queueDescription' => 'Chamados aguardando atribuição atualizam automaticamente a cada 10 segundos.',
+            'queueEndpoint' => '/tickets',
+            'showTodayLink' => true,
+            'showAllLink' => false,
+        ]);
+    }
+
+    public function today(): void
+    {
+        require_auth();
+
+        $today = new DateTimeImmutable('today');
+        $queue = $this->ticketService->getOpenQueue($today);
+
+        if (is_ajax()) {
+            json_response(['queue' => $queue]);
+        }
+
+        view('tickets/queue', [
+            'queue' => $queue,
+            'pageId' => 'today-queue-page',
+            'queueTitle' => 'Chamados iniciados hoje',
+            'queueDescription' => 'Acompanhe apenas os atendimentos que começaram na data atual.',
+            'queueEndpoint' => '/tickets/today',
+            'showTodayLink' => false,
+            'showAllLink' => true,
         ]);
     }
 

@@ -8,6 +8,7 @@ use App\Models\Ticket;
 use DateTimeImmutable;
 use PDO;
 use RuntimeException;
+use Throwable;
 
 class TicketService
 {
@@ -22,16 +23,44 @@ class TicketService
     /**
      * @return array<int, array<string, mixed>>
      */
-    public function getOpenQueue(): array
+    public function getOpenQueue(?DateTimeImmutable $openedDate = null): array
     {
-        $stmt = $this->connection->prepare(
-            'SELECT t.*, c.display_name AS contact_name FROM tickets t
-            INNER JOIN contacts c ON c.id = t.contact_id
-            WHERE t.status = :status ORDER BY t.opened_at ASC'
-        );
-        $stmt->execute(['status' => Ticket::STATUS_OPEN]);
+        $sql = 'SELECT t.*, c.display_name AS contact_name FROM tickets t'
+            . ' INNER JOIN contacts c ON c.id = t.contact_id'
+            . ' WHERE t.status = :status';
 
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $params = ['status' => Ticket::STATUS_OPEN];
+        if ($openedDate !== null) {
+            $sql .= ' AND DATE(t.opened_at) = :opened_date';
+            $params['opened_date'] = $openedDate->format('Y-m-d');
+        }
+
+        $sql .= ' ORDER BY t.opened_at ASC';
+
+        $stmt = $this->connection->prepare($sql);
+        foreach ($params as $key => $value) {
+            $stmt->bindValue(':' . $key, $value);
+        }
+        $stmt->execute();
+
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $today = (new DateTimeImmutable('today'))->format('Y-m-d');
+
+        return array_map(static function (array $row) use ($today): array {
+            $row['opened_today'] = false;
+
+            $openedAt = $row['opened_at'] ?? null;
+            if (is_string($openedAt) && $openedAt !== '') {
+                try {
+                    $opened = new DateTimeImmutable($openedAt);
+                    $row['opened_today'] = $opened->format('Y-m-d') === $today;
+                } catch (Throwable $exception) {
+                    // Ignore parse failures and keep opened_today as false.
+                }
+            }
+
+            return $row;
+        }, $rows);
     }
 
     public function assignToUser(int $ticketId, int $userId): void

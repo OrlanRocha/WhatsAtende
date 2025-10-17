@@ -6,6 +6,14 @@ const escapeHtml = (value) => {
     return div.innerHTML;
 };
 
+const renderOpenedAt = (ticket) => {
+    const opened = ticket?.opened_at ? escapeHtml(ticket.opened_at) : '';
+    if (!ticket?.opened_today) {
+        return opened;
+    }
+    return `${opened} <span class="badge bg-success-subtle text-success ms-1">Hoje</span>`;
+};
+
 export function initQueue(selector, endpoint) {
     const container = document.querySelector(selector);
     if (!container) {
@@ -31,7 +39,7 @@ export function initQueue(selector, endpoint) {
                     <td>${escapeHtml(ticket.contact_name)}</td>
                     <td>${escapeHtml(ticket.channel)}</td>
                     <td><span class="badge bg-secondary text-capitalize">${escapeHtml(ticket.status)}</span></td>
-                    <td>${ticket.opened_at ? new Date(ticket.opened_at).toLocaleString('pt-BR') : ''}</td>
+                    <td>${renderOpenedAt(ticket)}</td>
                     <td class="text-end">
                         <button class="btn btn-sm btn-success" data-assign data-ticket="${ticket.id}">
                             <i class="bi bi-headset"></i> Iniciar atendimento

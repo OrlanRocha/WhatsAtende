@@ -1,6 +1,7 @@
 <?php
 
 use App\Controllers\Admin\DashboardController as AdminDashboardController;
+use App\Controllers\Admin\EvolutionController as AdminEvolutionController;
 use App\Controllers\Admin\LogController as AdminLogController;
 use App\Controllers\Admin\TemplateController as AdminTemplateController;
 use App\Controllers\Admin\TicketController as AdminTicketController;
@@ -15,6 +16,7 @@ return [
     ['GET', '/', [TicketController::class, 'index']],
     ['GET', '/admin', [AdminDashboardController::class, 'index']],
     ['GET', '/admin/tickets', [AdminTicketController::class, 'index']],
+    ['GET', '/admin/evolution/chats', [AdminEvolutionController::class, 'chats']],
     ['GET', '/admin/users', [AdminUserController::class, 'index']],
     ['GET', '/admin/users/create', [AdminUserController::class, 'create']],
     ['POST', '/admin/users', [AdminUserController::class, 'store']],
@@ -47,6 +49,7 @@ return [
     ['GET', '/reset-password/{token}', [AuthController::class, 'showResetPasswordForm']],
     ['POST', '/reset-password', [AuthController::class, 'resetPassword']],
     ['GET', '/tickets', [TicketController::class, 'index']],
+    ['GET', '/tickets/today', [TicketController::class, 'today']],
     ['GET', '/tickets/{id}', [TicketController::class, 'show']],
     ['POST', '/tickets/{id}/assign', [TicketController::class, 'assign']],
     ['POST', '/tickets/{id}/messages', [TicketController::class, 'storeMessage']],

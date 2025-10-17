@@ -14,6 +14,7 @@ $user = auth();
                 <li class="nav-item"><a class="nav-link" href="/admin"><i class="bi bi-graph-up"></i> Dashboard</a></li>
                 <li class="nav-item"><a class="nav-link" href="/admin/tickets"><i class="bi bi-inboxes"></i> Solicitações</a></li>
                 <li class="nav-item"><a class="nav-link" href="/tickets"><i class="bi bi-people"></i> Fila de Atendimento</a></li>
+                <li class="nav-item"><a class="nav-link" href="/admin/evolution/chats"><i class="bi bi-lightning-charge"></i> Chats Evolution</a></li>
                 <li class="nav-item"><a class="nav-link" href="/admin/templates"><i class="bi bi-stickies"></i> Templates</a></li>
                 <li class="nav-item"><a class="nav-link" href="/admin/users"><i class="bi bi-person-gear"></i> Usuários</a></li>
                 <li class="nav-item"><a class="nav-link" href="/admin/logs"><i class="bi bi-clipboard-data"></i> Logs</a></li>
