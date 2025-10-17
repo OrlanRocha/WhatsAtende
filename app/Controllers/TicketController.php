@@ -1,0 +1,168 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Controllers;
+
+use App\Services\LoggerService;
+use App\Services\TicketService;
+use RuntimeException;
+use Throwable;
+
+class TicketController
+{
+    public function __construct(
+        private TicketService $ticketService,
+        private LoggerService $logger
+    ) {
+    }
+
+    public function index(): void
+    {
+        require_auth();
+        $queue = $this->ticketService->getOpenQueue();
+
+        if (is_ajax()) {
+            json_response(['queue' => $queue]);
+        }
+
+        view('tickets/queue', [
+            'queue' => $queue,
+        ]);
+    }
+
+    public function show(int $ticketId): void
+    {
+        require_auth();
+        try {
+            $ticket = $this->ticketService->getTicketWithMessages($ticketId);
+        } catch (Throwable $exception) {
+            $this->logger->error('ticket.show_failed', [
+                'ticket_id' => $ticketId,
+                'message' => $exception->getMessage(),
+            ]);
+
+            http_response_code(404);
+            echo 'Ticket not found';
+            return;
+        }
+
+        $templates = $this->ticketService->listMessageTemplates();
+
+        view('tickets/show', [
+            'ticket' => $ticket,
+            'templates' => $templates,
+        ]);
+    }
+
+    public function assign(int $ticketId): void
+    {
+        $user = require_auth();
+        if (!in_array($user->role ?? null, ['admin', 'agent'], true)) {
+            if (is_ajax()) {
+                json_response(['message' => 'Acesso restrito a atendentes.'], 403);
+            }
+            http_response_code(403);
+            echo 'Acesso restrito a atendentes.';
+            return;
+        }
+        $userId = (int) $user->id;
+        $this->ticketService->assignToUser($ticketId, $userId);
+
+        if (is_ajax()) {
+            json_response([
+                'message' => 'Chamado atribuído com sucesso.',
+                'redirect' => '/tickets/' . $ticketId,
+            ]);
+        }
+
+        redirect('/tickets/' . $ticketId);
+    }
+
+    public function storeMessage(int $ticketId): void
+    {
+        $user = require_auth();
+        if (!in_array($user->role ?? null, ['admin', 'agent'], true)) {
+            if (is_ajax()) {
+                json_response(['message' => 'Acesso restrito a atendentes.'], 403);
+            }
+            http_response_code(403);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'Acesso restrito a atendentes.']);
+            return;
+        }
+        $body = trim($_POST['message'] ?? '');
+        if ($body === '') {
+            http_response_code(422);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'Message body is required.']);
+            return;
+        }
+
+        $userId = (int) $user->id;
+
+        try {
+            $this->ticketService->appendAgentMessage($ticketId, $userId, $body);
+        } catch (RuntimeException $exception) {
+            $this->logger->error('ticket.store_message_failed', [
+                'ticket_id' => $ticketId,
+                'user_id' => $userId,
+                'error' => $exception->getMessage(),
+            ]);
+
+            json_response(['error' => $exception->getMessage()], 502);
+            return;
+        } catch (Throwable $exception) {
+            $this->logger->error('ticket.store_message_failed', [
+                'ticket_id' => $ticketId,
+                'user_id' => $userId,
+                'error' => $exception->getMessage(),
+            ]);
+
+            json_response(['error' => 'Não foi possível registrar a mensagem.'], 500);
+            return;
+        }
+
+        json_response(['message' => 'Mensagem enviada.']);
+    }
+
+
+    public function messages(int $ticketId): void
+    {
+        require_auth();
+        try {
+            $ticket = $this->ticketService->getTicketWithMessages($ticketId);
+        } catch (\Throwable $exception) {
+            http_response_code(404);
+            header('Content-Type: application/json');
+            echo json_encode([]);
+            return;
+        }
+
+        header('Content-Type: application/json');
+        echo json_encode($ticket['messages'] ?? []);
+    }
+
+    public function resolve(int $ticketId): void
+    {
+        $user = require_auth();
+        if (!in_array($user->role ?? null, ['admin', 'agent'], true)) {
+            if (is_ajax()) {
+                json_response(['message' => 'Acesso restrito a atendentes.'], 403);
+            }
+            http_response_code(403);
+            echo 'Acesso restrito a atendentes.';
+            return;
+        }
+        $this->ticketService->resolveTicket($ticketId);
+
+        if (is_ajax()) {
+            json_response([
+                'message' => 'Chamado finalizado com sucesso.',
+                'redirect' => '/tickets',
+            ]);
+        }
+
+        redirect('/tickets');
+    }
+}
