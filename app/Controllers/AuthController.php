@@ -163,24 +163,16 @@ class AuthController
         $email = filter_input(INPUT_POST, 'email', FILTER_SANITIZE_EMAIL) ?: '';
 
         if ($email !== '') {
-            $token = $this->authService->createPasswordReset($email);
-            if ($token) {
-                $message = 'Link de redefinição gerado. Utilize o token abaixo para continuar: ' . $token;
-                if (is_ajax()) {
-                    json_response(['message' => $message]);
-                }
-                set_flash('auth_status', $message);
-                redirect('/forgot-password');
-            }
+            $this->authService->createPasswordReset($email);
         }
 
-        $fallback = 'Se o e-mail existir em nossa base, você receberá instruções em instantes.';
+        $message = 'Se o e-mail existir em nossa base, você receberá instruções em instantes.';
 
         if (is_ajax()) {
-            json_response(['message' => $fallback]);
+            json_response(['message' => $message]);
         }
 
-        set_flash('auth_status', $fallback);
+        set_flash('auth_status', $message);
         redirect('/forgot-password');
     }
 
@@ -220,7 +212,7 @@ class AuthController
         }
 
         if ($errors !== []) {
-            $this->handleAuthError($errors, $_SERVER['HTTP_REFERER'] ?? '/forgot-password');
+            $this->handleAuthError($errors, $this->safeReferer('/forgot-password'));
         }
 
         $updated = $this->authService->resetPassword($token, $password);
@@ -238,6 +230,37 @@ class AuthController
 
         set_flash('auth_status', 'Senha redefinida com sucesso. Faça login novamente.');
         redirect('/login');
+    }
+
+    private function safeReferer(string $fallback): string
+    {
+        $referer = $_SERVER['HTTP_REFERER'] ?? '';
+        if ($referer === '') {
+            return $fallback;
+        }
+
+        $parts = parse_url($referer);
+        if ($parts === false) {
+            return $fallback;
+        }
+
+        $hostMatches = !isset($parts['host']) || (isset($_SERVER['HTTP_HOST']) && strcasecmp($parts['host'], $_SERVER['HTTP_HOST']) === 0);
+        if (!$hostMatches) {
+            return $fallback;
+        }
+
+        $path = $parts['path'] ?? '';
+        if ($path === '' || strpos($path, '/') !== 0 || strpos($path, '//') === 0) {
+            return $fallback;
+        }
+
+        $redirect = $path;
+
+        if (isset($parts['query']) && $parts['query'] !== '') {
+            $redirect .= '?' . $parts['query'];
+        }
+
+        return $redirect;
     }
 
     private function handleAuthError(array $errors, string $redirect): void
