@@ -22,8 +22,27 @@ class EvolutionController
 
         $chats = [];
         $error = null;
-        if (($result['success'] ?? false) && is_array($result['data'] ?? null)) {
-            $chats = array_map([$this, 'normalizeChat'], $result['data']);
+        if (($result['success'] ?? false)) {
+            $rawChats = $this->extractChats($result['data'] ?? null);
+            $chats = array_map([$this, 'normalizeChat'], $rawChats);
+            usort($chats, static function (array $a, array $b): int {
+                $aTime = $a['last_message_at'] ?? null;
+                $bTime = $b['last_message_at'] ?? null;
+
+                if ($aTime === $bTime) {
+                    return 0;
+                }
+
+                if ($bTime === null) {
+                    return -1;
+                }
+
+                if ($aTime === null) {
+                    return 1;
+                }
+
+                return strcmp($bTime, $aTime);
+            });
             $statusCode = 200;
         } else {
             $error = $result['error_detail'] ?? $result['error'] ?? 'Falha ao consultar Evolution API.';
@@ -34,6 +53,7 @@ class EvolutionController
                 'status' => $statusCode,
                 'chats' => $chats,
                 'error' => $error,
+                'fetched_at' => date('Y-m-d H:i:s'),
             ], $statusCode);
         }
 
@@ -41,6 +61,48 @@ class EvolutionController
             'chats' => $chats,
             'error' => $error,
         ]);
+    }
+
+    /**
+     * @param mixed $data
+     * @return array<int, array<string, mixed>>
+     */
+    private function extractChats(mixed $data): array
+    {
+        if ($data === null) {
+            return [];
+        }
+
+        if (is_array($data)) {
+            if (array_is_list($data)) {
+                return $data;
+            }
+
+            $candidates = [$data];
+            foreach (['chats', 'data', 'items', 'rows', 'response'] as $key) {
+                if (isset($data[$key])) {
+                    $value = $data[$key];
+                    if (is_array($value)) {
+                        $candidates[] = $value;
+                    }
+                }
+            }
+
+            foreach ($candidates as $candidate) {
+                if (!is_array($candidate)) {
+                    continue;
+                }
+                if (array_is_list($candidate)) {
+                    return $candidate;
+                }
+                $values = array_values($candidate);
+                if ($values !== [] && is_array($values[0])) {
+                    return $values;
+                }
+            }
+        }
+
+        return [];
     }
 
     /**
@@ -52,8 +114,22 @@ class EvolutionController
         $id = (string) ($chat['remoteJid'] ?? $chat['id'] ?? $chat['wid'] ?? '');
         $name = (string) ($chat['name'] ?? $chat['pushName'] ?? $chat['contact'] ?? '');
         $unread = (int) ($chat['unreadCount'] ?? $chat['unread'] ?? 0);
-        $lastMessage = $this->extractTimestamp($chat['conversationTimestamp'] ?? $chat['lastMessageAt'] ?? $chat['last_message_at'] ?? null);
-        $createdAt = $this->extractTimestamp($chat['createdAt'] ?? $chat['created_at'] ?? null);
+        $lastMessage = $this->extractTimestamp(
+            $chat['conversationTimestamp']
+                ?? $chat['lastMessageAt']
+                ?? $chat['last_message_at']
+                ?? $chat['last_message']
+                ?? $chat['lastMessage']
+                ?? null
+        );
+        $createdAt = $this->extractTimestamp(
+            $chat['createdAt']
+                ?? $chat['created_at']
+                ?? $chat['firstSeen']
+                ?? $chat['startAt']
+                ?? $chat['started_at']
+                ?? null
+        );
 
         static $today = null;
         if ($today === null) {

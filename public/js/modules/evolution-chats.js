@@ -46,6 +46,7 @@ export function initEvolutionChats(selector, endpoint) {
     const table = container.querySelector('#evolution-chats-table');
     const refreshButton = container.querySelector('[data-refresh-chats]');
     const alertStack = container.querySelector('.alert-stack');
+    const lastUpdated = container.querySelector('[data-last-updated]');
 
     const render = (data) => {
         if (!table) {
@@ -56,7 +57,11 @@ export function initEvolutionChats(selector, endpoint) {
             return;
         }
         const rows = Array.isArray(data) ? data : [];
-        tbody.innerHTML = rows.map((chat) => renderChatRow(chat)).join('');
+        if (rows.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Nenhum chat retornado pela Evolution.</td></tr>';
+        } else {
+            tbody.innerHTML = rows.map((chat) => renderChatRow(chat)).join('');
+        }
         initTable(table);
     };
 
@@ -79,10 +84,18 @@ export function initEvolutionChats(selector, endpoint) {
                 setError('');
             }
             render(data?.chats ?? []);
+            if (lastUpdated) {
+                const fetchedAt = data?.fetched_at;
+                const display = fetchedAt ? `Atualizado em ${fetchedAt}` : `Atualizado em ${new Date().toLocaleString()}`;
+                lastUpdated.textContent = display;
+            }
         } catch (error) {
             const message = error?.data?.error || error?.message || 'Não foi possível consultar a Evolution.';
             setError(message);
             showToast(message, 'error');
+            if (lastUpdated) {
+                lastUpdated.textContent = `Erro ao atualizar em ${new Date().toLocaleString()}`;
+            }
         }
     };
 

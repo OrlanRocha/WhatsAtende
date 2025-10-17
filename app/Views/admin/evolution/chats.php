@@ -13,6 +13,9 @@ include base_path('app/Views/admin/partials/nav.php');
         </div>
         <div class="d-flex align-items-center gap-2 flex-wrap">
             <span class="badge text-bg-secondary">Total: <?= count($chats) ?></span>
+            <span class="text-muted small" data-last-updated>
+                Atualizado em <?= htmlspecialchars(date('d/m/Y H:i:s')) ?>
+            </span>
             <button class="btn btn-outline-secondary" data-refresh-chats>
                 <i class="bi bi-arrow-repeat"></i> Atualizar agora
             </button>

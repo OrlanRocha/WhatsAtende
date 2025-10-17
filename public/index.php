@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Controllers\Admin\DashboardController as AdminDashboardController;
+use App\Controllers\Admin\EvolutionController as AdminEvolutionController;
 use App\Controllers\Admin\LogController as AdminLogController;
 use App\Controllers\Admin\TemplateController as AdminTemplateController;
 use App\Controllers\Admin\TicketController as AdminTicketController;
