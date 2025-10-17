@@ -113,29 +113,62 @@ class EvolutionController
     {
         $id = (string) ($chat['remoteJid'] ?? $chat['id'] ?? $chat['wid'] ?? '');
         $name = (string) ($chat['name'] ?? $chat['pushName'] ?? $chat['contact'] ?? '');
+        if ($name === '' && isset($chat['lastMessage']) && is_array($chat['lastMessage'])) {
+            $name = (string) ($chat['lastMessage']['pushName'] ?? $chat['lastMessage']['contact'] ?? $chat['lastMessage']['participant'] ?? '');
+        }
+
         $unread = (int) ($chat['unreadCount'] ?? $chat['unread'] ?? 0);
-        $lastMessage = $this->extractTimestamp(
-            $chat['conversationTimestamp']
-                ?? $chat['lastMessageAt']
-                ?? $chat['last_message_at']
-                ?? $chat['last_message']
-                ?? $chat['lastMessage']
-                ?? null
-        );
-        $createdAt = $this->extractTimestamp(
-            $chat['createdAt']
-                ?? $chat['created_at']
-                ?? $chat['firstSeen']
-                ?? $chat['startAt']
-                ?? $chat['started_at']
-                ?? null
-        );
+
+        $lastMessageSource = $chat['conversationTimestamp']
+            ?? $chat['lastMessageAt']
+            ?? $chat['last_message_at']
+            ?? $chat['last_message']
+            ?? null;
+
+        if ($lastMessageSource === null && isset($chat['lastMessage']) && is_array($chat['lastMessage'])) {
+            $lastMessageSource = $chat['lastMessage']['messageTimestamp']
+                ?? $chat['lastMessage']['timestamp']
+                ?? $chat['lastMessage']['createdAt']
+                ?? $chat['lastMessage']['created_at']
+                ?? null;
+        }
+
+        if ($lastMessageSource === null) {
+            $lastMessageSource = $chat['updatedAt'] ?? $chat['updated_at'] ?? $chat['last_activity_at'] ?? null;
+        }
+
+        $lastMessage = $this->extractTimestamp($lastMessageSource);
+
+        $createdSource = $chat['createdAt']
+            ?? $chat['created_at']
+            ?? $chat['firstSeen']
+            ?? $chat['startAt']
+            ?? $chat['started_at']
+            ?? $chat['windowStart']
+            ?? $chat['window_start']
+            ?? null;
+
+        if ($createdSource === null) {
+            $createdSource = $chat['updatedAt'] ?? $chat['updated_at'] ?? null;
+        }
+
+        $createdAt = $this->extractTimestamp($createdSource);
+
+        if ($createdAt === null) {
+            $createdAt = $lastMessage;
+        }
 
         static $today = null;
         if ($today === null) {
             $today = (new DateTimeImmutable('today'))->format('Y-m-d');
         }
-        $openedToday = $createdAt !== null && str_starts_with($createdAt, $today);
+        $openedToday = false;
+        foreach ([$createdAt, $lastMessage, $this->extractTimestamp($chat['updatedAt'] ?? $chat['updated_at'] ?? null)] as $candidate) {
+            if ($candidate !== null && str_starts_with($candidate, $today)) {
+                $openedToday = true;
+                break;
+            }
+        }
 
         return [
             'id' => $id,
