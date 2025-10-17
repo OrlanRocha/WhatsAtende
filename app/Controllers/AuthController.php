@@ -244,9 +244,50 @@ class AuthController
             return $fallback;
         }
 
-        $hostMatches = !isset($parts['host']) || (isset($_SERVER['HTTP_HOST']) && strcasecmp($parts['host'], $_SERVER['HTTP_HOST']) === 0);
-        if (!$hostMatches) {
+        if (isset($parts['scheme']) && !in_array(strtolower($parts['scheme']), ['http', 'https'], true)) {
             return $fallback;
+        }
+
+        $allowedHosts = [];
+        $httpHost = $_SERVER['HTTP_HOST'] ?? '';
+        if ($httpHost !== '') {
+            $allowedHosts[] = strtolower($httpHost);
+            if (strpos($httpHost, ':') !== false) {
+                $hostWithoutPort = strstr($httpHost, ':', true);
+                if ($hostWithoutPort !== false && $hostWithoutPort !== '') {
+                    $allowedHosts[] = strtolower($hostWithoutPort);
+                }
+            }
+        }
+
+        $serverName = $_SERVER['SERVER_NAME'] ?? '';
+        if ($serverName !== '') {
+            $allowedHosts[] = strtolower($serverName);
+            $serverPort = $_SERVER['SERVER_PORT'] ?? '';
+            if ($serverPort !== '') {
+                $allowedHosts[] = strtolower($serverName . ':' . $serverPort);
+            }
+        }
+
+        $allowedHosts = array_values(array_unique(array_filter($allowedHosts)));
+
+        if (isset($parts['host'])) {
+            if ($allowedHosts === []) {
+                return $fallback;
+            }
+
+            $refererHost = strtolower($parts['host']);
+            $refererAuthority = $refererHost;
+            if (isset($parts['port'])) {
+                $refererAuthority .= ':' . $parts['port'];
+            }
+
+            $hostMatches = in_array($refererAuthority, $allowedHosts, true)
+                || (!isset($parts['port']) && in_array($refererHost, $allowedHosts, true));
+
+            if (!$hostMatches) {
+                return $fallback;
+            }
         }
 
         $path = $parts['path'] ?? '';
