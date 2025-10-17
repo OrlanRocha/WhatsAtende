@@ -111,6 +111,7 @@ container_bind(AdminUserController::class, static fn () => new AdminUserControll
 container_bind(AdminTemplateController::class, static fn () => new AdminTemplateController(resolve(TemplateService::class)));
 container_bind(AdminLogController::class, static fn () => new AdminLogController(resolve(LoggerService::class)));
 container_bind(AdminWebhookController::class, static fn () => new AdminWebhookController(resolve(SettingService::class), resolve(EvolutionService::class)));
+container_bind(AdminEvolutionController::class, static fn () => new AdminEvolutionController(resolve(EvolutionService::class)));
 container_bind(ApiEvolutionController::class, static fn () => new ApiEvolutionController(resolve(EvolutionService::class)));
 
 $routes = require base_path('routes/web.php');
