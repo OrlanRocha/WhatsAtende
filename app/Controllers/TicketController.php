@@ -129,8 +129,10 @@ class TicketController
             return;
         }
 
-        $remoteJid = trim($_POST['remote_jid'] ?? '');
-        $name = trim($_POST['name'] ?? '');
+        $payload = $this->getRequestPayload();
+
+        $remoteJid = trim((string) ($payload['remote_jid'] ?? $_POST['remote_jid'] ?? ''));
+        $name = trim((string) ($payload['name'] ?? $_POST['name'] ?? ''));
 
         try {
             $ticketId = $this->ticketService->startNativeConversation(
@@ -166,6 +168,25 @@ class TicketController
             'ticket_id' => $ticketId,
             'redirect' => '/tickets/' . $ticketId,
         ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function getRequestPayload(): array
+    {
+        $contentType = $_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '';
+        if (is_string($contentType) && str_contains($contentType, 'application/json')) {
+            $rawInput = file_get_contents('php://input');
+            if ($rawInput !== false && $rawInput !== '') {
+                $decoded = json_decode($rawInput, true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                    return $decoded;
+                }
+            }
+        }
+
+        return [];
     }
 
     public function storeMessage(int $ticketId): void
