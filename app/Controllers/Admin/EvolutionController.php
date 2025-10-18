@@ -119,14 +119,39 @@ class EvolutionController
 
         $unread = (int) ($chat['unreadCount'] ?? $chat['unread'] ?? 0);
 
-        if (isset($chat['lastMessage']) && is_array($chat['lastMessage'])) {
+        $messages = $this->extractMessages($chat);
+        $calculatedUnread = 0;
+        foreach ($messages as $message) {
+            if (!is_array($message)) {
+                continue;
+            }
+
+            $type = strtolower((string) ($message['messageType'] ?? $message['type'] ?? ''));
+            if ($type !== '' && $type !== 'conversation') {
+                continue;
+            }
+
+            $fromMe = (bool) ($message['key']['fromMe'] ?? $message['fromMe'] ?? false);
+            if ($fromMe) {
+                continue;
+            }
+
+            $status = strtoupper((string) ($message['status'] ?? ''));
+            if ($status === 'READ') {
+                continue;
+            }
+
+            $calculatedUnread++;
+        }
+
+        if ($calculatedUnread > 0) {
+            $unread = $calculatedUnread;
+        } elseif ($unread === 0 && isset($chat['lastMessage']) && is_array($chat['lastMessage'])) {
             $lastMessage = $chat['lastMessage'];
             $status = strtoupper((string) ($lastMessage['status'] ?? ''));
             $fromMe = (bool) ($lastMessage['key']['fromMe'] ?? $lastMessage['fromMe'] ?? false);
 
-            if ($status === 'READ') {
-                $unread = 0;
-            } elseif ($status === 'DELIVERY_ACK' && !$fromMe && $unread === 0) {
+            if ($status !== 'READ' && !$fromMe) {
                 $unread = 1;
             }
         }
@@ -191,6 +216,34 @@ class EvolutionController
             'opened_today' => $openedToday,
             'raw' => $chat,
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $chat
+     * @return array<int, mixed>
+     */
+    private function extractMessages(array $chat): array
+    {
+        $messages = [];
+        foreach (['messages', 'lastMessages', 'history', 'items'] as $key) {
+            if (!isset($chat[$key]) || !is_array($chat[$key])) {
+                continue;
+            }
+
+            $candidate = $chat[$key];
+            if (array_is_list($candidate)) {
+                $messages = array_merge($messages, $candidate);
+                continue;
+            }
+
+            $messages = array_merge($messages, array_values($candidate));
+        }
+
+        if (isset($chat['lastMessage']) && is_array($chat['lastMessage'])) {
+            $messages[] = $chat['lastMessage'];
+        }
+
+        return $messages;
     }
 
     private function extractTimestamp(mixed $value): ?string
