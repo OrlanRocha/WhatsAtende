@@ -29,7 +29,7 @@ class EvolutionService
     }
 
     /**
-     * @return array{status:int, success:bool, data:mixed, error:?string}
+     * @return array{status:int, success:bool, data:mixed, error:?string, error_detail:?string, content_type:?string, body:mixed}
      */
     public function getChats(): array
     {
@@ -38,7 +38,23 @@ class EvolutionService
             return $this->notConfiguredResponse();
         }
 
-        return $this->makeRequest($config, 'POST', '/chat/findChats/' . $config['instance'], []);
+        $response = $this->makeRequest(
+            $config,
+            'POST',
+            '/chat/findChats/' . $config['instance'],
+            [],
+            [200, 204, 404]
+        );
+
+        if (($response['success'] ?? false) && in_array($response['status'], [204, 404], true)) {
+            $response['status'] = 200;
+        }
+
+        if (($response['success'] ?? false) && !is_array($response['data'])) {
+            $response['data'] = [];
+        }
+
+        return $response;
     }
 
     /**
@@ -270,9 +286,16 @@ class EvolutionService
     }
 
     /**
+     * @param array<int, int> $expectedStatuses
      * @return array{status:int, success:bool, data:mixed, error:?string, error_detail:?string, content_type:?string, body:mixed}
      */
-    private function makeRequest(array $config, string $method, string $endpoint, ?array $payload = null): array
+    private function makeRequest(
+        array $config,
+        string $method,
+        string $endpoint,
+        ?array $payload = null,
+        array $expectedStatuses = []
+    ): array
     {
         $url = $config['base_url'] . $endpoint;
         $method = strtoupper($method);
@@ -383,7 +406,11 @@ class EvolutionService
             }
         }
 
+        $normalizedExpected = array_map('intval', $expectedStatuses);
         $success = $status >= 200 && $status < 300;
+        if (!$success && $normalizedExpected !== []) {
+            $success = in_array($status, $normalizedExpected, true);
+        }
         $errorDetail = null;
         if (!$success) {
             if ($curlError !== '') {
@@ -446,6 +473,9 @@ class EvolutionService
             'success' => false,
             'data' => null,
             'error' => 'Integração nativa não configurada.',
+            'error_detail' => null,
+            'content_type' => null,
+            'body' => null,
         ];
     }
 
