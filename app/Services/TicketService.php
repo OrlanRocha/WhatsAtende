@@ -202,7 +202,8 @@ class TicketService
              ORDER BY m.sent_at ASC'
         );
         $stmtMessages->execute(['id' => $ticketId]);
-        $ticket['messages'] = $stmtMessages->fetchAll(PDO::FETCH_ASSOC);
+        $dbMessages = $stmtMessages->fetchAll(PDO::FETCH_ASSOC);
+        $ticket['messages'] = $this->composeTicketMessages($ticket, $dbMessages);
 
         return $ticket;
     }
@@ -287,6 +288,174 @@ class TicketService
         ]);
 
         $this->logger->info('ticket.resolved', ['ticket_id' => $ticketId]);
+    }
+
+    /**
+     * @param array<string, mixed> $ticket
+     * @param array<int, array<string, mixed>> $dbMessages
+     * @return array<int, array<string, mixed>>
+     */
+    private function composeTicketMessages(array $ticket, array $dbMessages): array
+    {
+        $normalizedDb = $this->normalizeDatabaseMessages($dbMessages);
+
+        $integration = $this->settings->integrationSettings();
+        $isNative = ($integration['integration_mode'] ?? 'webhook') === 'native' && $this->evolution->isNativeEnabled();
+        $remoteJid = trim((string) ($ticket['contact_external_id'] ?? ''));
+
+        if (!$isNative || $remoteJid === '') {
+            return $normalizedDb;
+        }
+
+        $native = $this->evolution->fetchConversationMessages($remoteJid);
+        if (!($native['success'] ?? false)) {
+            $this->logger->error('evolution.ticket_messages_failed', [
+                'ticket_id' => $ticket['id'] ?? null,
+                'remote_jid' => $remoteJid,
+                'error' => $native['error'] ?? 'Falha desconhecida ao sincronizar mensagens nativas.',
+            ]);
+
+            return $normalizedDb;
+        }
+
+        $normalizedNative = $this->normalizeNativeMessages($ticket, $native['messages'] ?? []);
+        if ($normalizedNative === []) {
+            return $normalizedDb;
+        }
+
+        $existing = [];
+        foreach ($normalizedNative as $message) {
+            $existing[$this->messageSignature($message)] = true;
+        }
+
+        foreach ($normalizedDb as $message) {
+            $signature = $this->messageSignature($message);
+            if (!isset($existing[$signature])) {
+                $normalizedNative[] = $message;
+            }
+        }
+
+        usort($normalizedNative, static function (array $a, array $b): int {
+            $aTime = $a['sent_at'] ?? '';
+            $bTime = $b['sent_at'] ?? '';
+
+            if ($aTime === $bTime) {
+                return strcmp((string) ($a['id'] ?? ''), (string) ($b['id'] ?? ''));
+            }
+
+            return strcmp((string) $aTime, (string) $bTime);
+        });
+
+        return $normalizedNative;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $messages
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeDatabaseMessages(array $messages): array
+    {
+        $normalized = array_map(static function (array $message): array {
+            return [
+                'id' => $message['id'] ?? null,
+                'ticket_id' => $message['ticket_id'] ?? null,
+                'sender_type' => $message['sender_type'] ?? 'contact',
+                'user_id' => $message['user_id'] ?? null,
+                'body' => (string) ($message['body'] ?? ''),
+                'media_type' => $message['media_type'] ?? 'text',
+                'media_url' => $message['media_url'] ?? null,
+                'sent_at' => isset($message['sent_at']) ? (string) $message['sent_at'] : null,
+                'agent_name' => $message['agent_name'] ?? null,
+                'status' => $message['status'] ?? null,
+            ];
+        }, $messages);
+
+        usort($normalized, static function (array $a, array $b): int {
+            $aTime = $a['sent_at'] ?? '';
+            $bTime = $b['sent_at'] ?? '';
+
+            if ($aTime === $bTime) {
+                return strcmp((string) ($a['id'] ?? ''), (string) ($b['id'] ?? ''));
+            }
+
+            return strcmp((string) $aTime, (string) $bTime);
+        });
+
+        return $normalized;
+    }
+
+    /**
+     * @param array<string, mixed> $ticket
+     * @param array<int, array<string, mixed>> $messages
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeNativeMessages(array $ticket, array $messages): array
+    {
+        $ticketId = $ticket['id'] ?? null;
+        $assignedUserId = $ticket['assigned_user_id'] ?? null;
+        $agentName = $ticket['agent_name'] ?? null;
+
+        $normalized = [];
+        foreach ($messages as $message) {
+            if (!is_array($message)) {
+                continue;
+            }
+
+            $id = isset($message['id']) ? (string) $message['id'] : '';
+            if ($id === '') {
+                continue;
+            }
+
+            $sentAt = $message['sent_at'] ?? null;
+            if (!is_string($sentAt) || $sentAt === '') {
+                continue;
+            }
+
+            $fromMe = (bool) ($message['from_me'] ?? false);
+
+            $normalized[] = [
+                'id' => $id,
+                'ticket_id' => $ticketId,
+                'sender_type' => $fromMe ? 'agent' : 'contact',
+                'user_id' => $fromMe ? $assignedUserId : null,
+                'body' => (string) ($message['body'] ?? ''),
+                'media_type' => $message['media_type'] ?? 'text',
+                'media_url' => $message['media_url'] ?? null,
+                'sent_at' => $sentAt,
+                'agent_name' => $fromMe ? ($agentName ?: 'Você') : null,
+                'status' => $message['status'] ?? null,
+                'raw' => $message['raw'] ?? null,
+            ];
+        }
+
+        usort($normalized, static function (array $a, array $b): int {
+            $aTime = $a['sent_at'] ?? '';
+            $bTime = $b['sent_at'] ?? '';
+
+            if ($aTime === $bTime) {
+                return strcmp((string) ($a['id'] ?? ''), (string) ($b['id'] ?? ''));
+            }
+
+            return strcmp((string) $aTime, (string) $bTime);
+        });
+
+        return $normalized;
+    }
+
+    /**
+     * @param array<string, mixed> $message
+     */
+    private function messageSignature(array $message): string
+    {
+        $parts = [
+            (string) ($message['id'] ?? ''),
+            (string) ($message['sent_at'] ?? ''),
+            (string) ($message['sender_type'] ?? ''),
+            (string) ($message['body'] ?? ''),
+            (string) ($message['media_url'] ?? ''),
+        ];
+
+        return md5(implode('|', $parts));
     }
 
     /**
