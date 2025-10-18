@@ -493,25 +493,85 @@ class EvolutionService
     private function extractMessages(array $chat): array
     {
         $messages = [];
+        $seen = [];
+
+        $addMessage = static function (array $message) use (&$messages, &$seen): void {
+            $identifier = null;
+            if (isset($message['id']) && is_scalar($message['id'])) {
+                $identifier = (string) $message['id'];
+            } elseif (isset($message['key']['id']) && is_scalar($message['key']['id'])) {
+                $identifier = (string) $message['key']['id'];
+            }
+
+            if ($identifier !== null) {
+                if (isset($seen[$identifier])) {
+                    return;
+                }
+                $seen[$identifier] = true;
+            }
+
+            $messages[] = $message;
+        };
+
         foreach (['messages', 'lastMessages', 'history', 'items'] as $key) {
-            if (!isset($chat[$key]) || !is_array($chat[$key])) {
+            if (!isset($chat[$key])) {
                 continue;
             }
 
-            $candidate = $chat[$key];
-            if (array_is_list($candidate)) {
-                $messages = array_merge($messages, $candidate);
-                continue;
+            foreach ($this->collectMessages($chat[$key]) as $message) {
+                if (is_array($message)) {
+                    $addMessage($message);
+                }
             }
-
-            $messages = array_merge($messages, array_values($candidate));
         }
 
         if (isset($chat['lastMessage']) && is_array($chat['lastMessage'])) {
-            $messages[] = $chat['lastMessage'];
+            $addMessage($chat['lastMessage']);
         }
 
         return $messages;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function collectMessages(mixed $value): array
+    {
+        if (!is_array($value)) {
+            return [];
+        }
+
+        if ($this->looksLikeMessage($value)) {
+            return [$value];
+        }
+
+        $messages = [];
+        if (array_is_list($value)) {
+            foreach ($value as $item) {
+                foreach ($this->collectMessages($item) as $message) {
+                    $messages[] = $message;
+                }
+            }
+
+            return $messages;
+        }
+
+        foreach ($value as $item) {
+            foreach ($this->collectMessages($item) as $message) {
+                $messages[] = $message;
+            }
+        }
+
+        return $messages;
+    }
+
+    private function looksLikeMessage(array $value): bool
+    {
+        return isset($value['key'])
+            || isset($value['messageType'])
+            || isset($value['type'])
+            || isset($value['status'])
+            || isset($value['message']);
     }
 
     private function extractTimestamp(mixed $value): ?string
