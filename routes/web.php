@@ -52,6 +52,7 @@ return [
     ['GET', '/tickets/today', [TicketController::class, 'today']],
     ['GET', '/tickets/{id}', [TicketController::class, 'show']],
     ['POST', '/tickets/{id}/assign', [TicketController::class, 'assign']],
+    ['POST', '/tickets/native/start', [TicketController::class, 'startNativeConversation']],
     ['POST', '/tickets/{id}/messages', [TicketController::class, 'storeMessage']],
     ['GET', '/tickets/{id}/messages', [TicketController::class, 'messages']],
     ['POST', '/tickets/{id}/resolve', [TicketController::class, 'resolve']],

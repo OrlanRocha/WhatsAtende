@@ -7,6 +7,7 @@ namespace App\Controllers;
 use App\Services\LoggerService;
 use App\Services\TicketService;
 use DateTimeImmutable;
+use InvalidArgumentException;
 use RuntimeException;
 use Throwable;
 
@@ -22,9 +23,13 @@ class TicketController
     {
         require_auth();
         $queue = $this->ticketService->getOpenQueue();
+        $native = $this->ticketService->listNativeChats();
 
         if (is_ajax()) {
-            json_response(['queue' => $queue]);
+            json_response([
+                'queue' => $queue,
+                'native' => $native,
+            ]);
         }
 
         view('tickets/queue', [
@@ -35,6 +40,8 @@ class TicketController
             'queueEndpoint' => '/tickets',
             'showTodayLink' => true,
             'showAllLink' => false,
+            'nativeChats' => $native,
+            'nativeStartEndpoint' => '/tickets/native/start',
         ]);
     }
 
@@ -44,9 +51,13 @@ class TicketController
 
         $today = new DateTimeImmutable('today');
         $queue = $this->ticketService->getOpenQueue($today);
+        $native = $this->ticketService->listNativeChats();
 
         if (is_ajax()) {
-            json_response(['queue' => $queue]);
+            json_response([
+                'queue' => $queue,
+                'native' => $native,
+            ]);
         }
 
         view('tickets/queue', [
@@ -57,6 +68,8 @@ class TicketController
             'queueEndpoint' => '/tickets/today',
             'showTodayLink' => false,
             'showAllLink' => true,
+            'nativeChats' => $native,
+            'nativeStartEndpoint' => '/tickets/native/start',
         ]);
     }
 
@@ -106,6 +119,53 @@ class TicketController
         }
 
         redirect('/tickets/' . $ticketId);
+    }
+
+    public function startNativeConversation(): void
+    {
+        $user = require_auth();
+        if (!in_array($user->role ?? null, ['admin', 'agent'], true)) {
+            json_response(['error' => 'Acesso restrito a atendentes.'], 403);
+            return;
+        }
+
+        $remoteJid = trim($_POST['remote_jid'] ?? '');
+        $name = trim($_POST['name'] ?? '');
+
+        try {
+            $ticketId = $this->ticketService->startNativeConversation(
+                $remoteJid,
+                $name !== '' ? $name : null,
+                (int) $user->id
+            );
+        } catch (InvalidArgumentException $exception) {
+            $this->logger->warning('ticket.native_start_validation_failed', [
+                'user_id' => $user->id ?? null,
+                'error' => $exception->getMessage(),
+            ]);
+            json_response(['error' => $exception->getMessage()], 422);
+            return;
+        } catch (RuntimeException $exception) {
+            $this->logger->error('ticket.native_start_failed', [
+                'user_id' => $user->id ?? null,
+                'error' => $exception->getMessage(),
+            ]);
+            json_response(['error' => $exception->getMessage()], 400);
+            return;
+        } catch (Throwable $exception) {
+            $this->logger->error('ticket.native_start_failed', [
+                'user_id' => $user->id ?? null,
+                'error' => $exception->getMessage(),
+            ]);
+            json_response(['error' => 'Não foi possível iniciar a conversa.'], 500);
+            return;
+        }
+
+        json_response([
+            'message' => 'Conversa iniciada com sucesso.',
+            'ticket_id' => $ticketId,
+            'redirect' => '/tickets/' . $ticketId,
+        ]);
     }
 
     public function storeMessage(int $ticketId): void

@@ -6,6 +6,8 @@
 /** @var string|null $queueEndpoint */
 /** @var bool|null $showTodayLink */
 /** @var bool|null $showAllLink */
+$nativeChats = $nativeChats ?? ['enabled' => false, 'chats' => [], 'error' => null];
+$nativeStartEndpoint = $nativeStartEndpoint ?? '/tickets/native/start';
 $status = get_flash('auth_status');
 $error = get_flash('auth_error');
 $pageId = $pageId ?? 'queue-page';
@@ -87,11 +89,47 @@ include base_path('app/Views/partials/topbar.php');
             </div>
         </div>
     </div>
+    <?php if (!empty($nativeChats['enabled'])): ?>
+        <div class="card shadow-sm border-0 mt-4" data-native-chats>
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                    <h2 class="h5 fw-semibold mb-1">Conversas nativas</h2>
+                    <p class="text-muted mb-0">Contatos retornados pela Evolution aguardando início de atendimento.</p>
+                </div>
+                <span class="badge text-bg-secondary" data-native-count>Disponíveis: <?= count($nativeChats['chats'] ?? []) ?></span>
+            </div>
+            <div class="card-body p-0">
+                <div class="alert alert-warning m-3<?= empty($nativeChats['error']) ? ' d-none' : '' ?>" data-native-error>
+                    <?= htmlspecialchars((string) ($nativeChats['error'] ?? '')) ?>
+                </div>
+                <div class="table-responsive">
+                    <table class="table align-middle mb-0" data-native-table>
+                        <thead>
+                        <tr>
+                            <th>Contato</th>
+                            <th>Não lidas</th>
+                            <th>Última mensagem</th>
+                            <th class="text-end">Ações</th>
+                        </tr>
+                        </thead>
+                        <tbody data-native-body>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    <?php endif; ?>
 </div>
 <script type="module">
 import { initQueue } from '/js/modules/queue.js';
 const pageSelector = <?= json_encode('#' . $pageId) ?>;
 const endpoint = <?= json_encode($queueEndpoint) ?>;
-initQueue(pageSelector, endpoint);
+const nativeConfig = <?= json_encode([
+    'enabled' => (bool) ($nativeChats['enabled'] ?? false),
+    'chats' => $nativeChats['chats'] ?? [],
+    'error' => $nativeChats['error'] ?? null,
+    'startEndpoint' => $nativeStartEndpoint,
+], JSON_UNESCAPED_UNICODE) ?>;
+initQueue(pageSelector, endpoint, nativeConfig);
 </script>
 <?php include base_path('app/Views/partials/layout-end.php'); ?>

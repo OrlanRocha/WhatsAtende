@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\Ticket;
+use InvalidArgumentException;
 use DateTimeImmutable;
 use PDO;
 use RuntimeException;
@@ -61,6 +62,85 @@ class TicketService
 
             return $row;
         }, $rows);
+    }
+
+    /**
+     * @return array{enabled:bool,chats:array<int, array<string, mixed>>,error:?string}
+     */
+    public function listNativeChats(): array
+    {
+        $enabled = $this->evolution->isNativeEnabled();
+        $result = [
+            'enabled' => $enabled,
+            'chats' => [],
+            'error' => null,
+        ];
+
+        if (!$enabled) {
+            return $result;
+        }
+
+        $overview = $this->evolution->fetchChatsOverview();
+        if (!($overview['success'] ?? false)) {
+            $result['error'] = $overview['error'] ?? 'Falha ao consultar Evolution API.';
+            return $result;
+        }
+
+        $activeContacts = $this->fetchActiveExternalIds();
+        $chats = [];
+        foreach ($overview['chats'] ?? [] as $chat) {
+            if (!is_array($chat)) {
+                continue;
+            }
+
+            $remoteJid = (string) ($chat['id'] ?? '');
+            if ($remoteJid === '') {
+                continue;
+            }
+
+            if (isset($activeContacts[$remoteJid])) {
+                continue;
+            }
+
+            $chats[] = $chat;
+        }
+
+        $result['chats'] = $chats;
+
+        return $result;
+    }
+
+    public function startNativeConversation(string $remoteJid, ?string $contactName, int $userId): int
+    {
+        $remoteJid = trim($remoteJid);
+        if ($remoteJid === '') {
+            throw new InvalidArgumentException('Identificador do contato é obrigatório.');
+        }
+
+        $integration = $this->settings->integrationSettings();
+        if (($integration['integration_mode'] ?? 'webhook') !== 'native' || !$this->evolution->isNativeEnabled()) {
+            throw new RuntimeException('Integração nativa não está habilitada.');
+        }
+
+        $normalizedName = $this->normalizeContactName($contactName);
+        $channel = 'whatsapp';
+
+        $this->connection->beginTransaction();
+        try {
+            $contactId = $this->findOrCreateContactByExternalId($remoteJid, $normalizedName);
+            $ticketId = $this->findActiveTicketForContact($contactId);
+            if ($ticketId === null) {
+                $ticketId = $this->createTicketForContact($contactId, $channel);
+            }
+            $this->connection->commit();
+        } catch (Throwable $exception) {
+            $this->connection->rollBack();
+            throw $exception;
+        }
+
+        $this->assignToUser($ticketId, $userId);
+
+        return $ticketId;
     }
 
     public function assignToUser(int $ticketId, int $userId): void
@@ -207,6 +287,130 @@ class TicketService
         ]);
 
         $this->logger->info('ticket.resolved', ['ticket_id' => $ticketId]);
+    }
+
+    /**
+     * @return array<string, bool>
+     */
+    private function fetchActiveExternalIds(): array
+    {
+        $stmt = $this->connection->prepare(
+            'SELECT DISTINCT c.external_id'
+            . ' FROM tickets t'
+            . ' INNER JOIN contacts c ON c.id = t.contact_id'
+            . ' WHERE t.status IN (:status_open, :status_assigned)'
+        );
+        $stmt->execute([
+            'status_open' => Ticket::STATUS_OPEN,
+            'status_assigned' => Ticket::STATUS_ASSIGNED,
+        ]);
+
+        $map = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $externalId) {
+            if (is_string($externalId) && $externalId !== '') {
+                $map[$externalId] = true;
+            }
+        }
+
+        return $map;
+    }
+
+    private function findOrCreateContactByExternalId(string $externalId, ?string $displayName): int
+    {
+        $stmt = $this->connection->prepare('SELECT id, display_name FROM contacts WHERE external_id = :external_id');
+        $stmt->execute(['external_id' => $externalId]);
+        $contact = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        if ($contact) {
+            $updates = ['last_interaction_at' => $now, 'id' => (int) $contact['id']];
+            $set = 'last_interaction_at = :last_interaction_at';
+
+            $currentName = trim((string) ($contact['display_name'] ?? ''));
+            if ($displayName !== null && $currentName === '') {
+                $updates['display_name'] = $displayName;
+                $set .= ', display_name = :display_name';
+            }
+
+            $updateStmt = $this->connection->prepare('UPDATE contacts SET ' . $set . ' WHERE id = :id');
+            $updateStmt->execute($updates);
+
+            return (int) $contact['id'];
+        }
+
+        $stmtInsert = $this->connection->prepare(
+            'INSERT INTO contacts (external_id, display_name, last_interaction_at)'
+            . ' VALUES (:external_id, :display_name, :last_interaction_at)'
+        );
+        $stmtInsert->execute([
+            'external_id' => $externalId,
+            'display_name' => $displayName,
+            'last_interaction_at' => $now,
+        ]);
+
+        return (int) $this->connection->lastInsertId();
+    }
+
+    private function findActiveTicketForContact(int $contactId): ?int
+    {
+        $stmt = $this->connection->prepare(
+            'SELECT id FROM tickets'
+            . ' WHERE contact_id = :contact_id'
+            . ' AND status IN (:status_open, :status_assigned)'
+            . ' ORDER BY opened_at DESC LIMIT 1'
+        );
+        $stmt->execute([
+            'contact_id' => $contactId,
+            'status_open' => Ticket::STATUS_OPEN,
+            'status_assigned' => Ticket::STATUS_ASSIGNED,
+        ]);
+
+        $ticketId = $stmt->fetchColumn();
+
+        return $ticketId !== false ? (int) $ticketId : null;
+    }
+
+    private function createTicketForContact(int $contactId, string $channel): int
+    {
+        $stmt = $this->connection->prepare(
+            'INSERT INTO tickets (contact_id, status, priority, channel)'
+            . ' VALUES (:contact_id, :status, :priority, :channel)'
+        );
+        $stmt->execute([
+            'contact_id' => $contactId,
+            'status' => Ticket::STATUS_OPEN,
+            'priority' => Ticket::PRIORITY_NORMAL,
+            'channel' => $channel,
+        ]);
+
+        $ticketId = (int) $this->connection->lastInsertId();
+
+        $this->connection->prepare(
+            'INSERT INTO ticket_metrics (ticket_id, first_response_at) VALUES (:ticket_id, NULL)'
+        )->execute(['ticket_id' => $ticketId]);
+
+        $this->logger->info('ticket.created_from_native', [
+            'ticket_id' => $ticketId,
+            'contact_id' => $contactId,
+            'message' => 'Ticket criado a partir da fila nativa.',
+        ]);
+
+        return $ticketId;
+    }
+
+    private function normalizeContactName(?string $name): ?string
+    {
+        if ($name === null) {
+            return null;
+        }
+
+        $trimmed = trim($name);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        return mb_substr($trimmed, 0, 150);
     }
 
     /**
