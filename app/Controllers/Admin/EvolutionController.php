@@ -119,6 +119,18 @@ class EvolutionController
 
         $unread = (int) ($chat['unreadCount'] ?? $chat['unread'] ?? 0);
 
+        if (isset($chat['lastMessage']) && is_array($chat['lastMessage'])) {
+            $lastMessage = $chat['lastMessage'];
+            $status = strtoupper((string) ($lastMessage['status'] ?? ''));
+            $fromMe = (bool) ($lastMessage['key']['fromMe'] ?? $lastMessage['fromMe'] ?? false);
+
+            if ($status === 'READ') {
+                $unread = 0;
+            } elseif ($status === 'DELIVERY_ACK' && !$fromMe && $unread === 0) {
+                $unread = 1;
+            }
+        }
+
         $lastMessageSource = $chat['conversationTimestamp']
             ?? $chat['lastMessageAt']
             ?? $chat['last_message_at']
