@@ -6,6 +6,66 @@ const escapeHtml = (value) => {
     return div.innerHTML;
 };
 
+const avatarCache = new Map();
+
+const loadAvatar = async (element) => {
+    const url = element.getAttribute('data-profile-url');
+    const fallback = element.querySelector('[data-profile-fallback]');
+
+    if (!url) {
+        element.classList.add('avatar-empty');
+        return;
+    }
+
+    const apply = (src) => {
+        element.style.backgroundImage = `url('${src}')`;
+        element.classList.add('avatar-has-image');
+        if (fallback) {
+            fallback.textContent = '';
+        }
+    };
+
+    if (avatarCache.has(url)) {
+        apply(avatarCache.get(url));
+        return;
+    }
+
+    try {
+        const response = await fetch(url, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        });
+        if (!response.ok) {
+            throw new Error('Request failed');
+        }
+
+        const contentType = response.headers.get('Content-Type') || '';
+        if (!contentType.startsWith('image/')) {
+            throw new Error('Not an image');
+        }
+
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        avatarCache.set(url, objectUrl);
+        apply(objectUrl);
+    } catch (error) {
+        element.classList.add('avatar-empty');
+    }
+};
+
+const hydrateAvatars = (scope) => {
+    if (!scope) {
+        return;
+    }
+
+    scope.querySelectorAll('[data-profile-url]').forEach((element) => {
+        if (element.dataset.profileLoaded === 'true') {
+            return;
+        }
+        element.dataset.profileLoaded = 'true';
+        loadAvatar(element);
+    });
+};
+
 const renderOpenedAt = (ticket) => {
     const opened = ticket?.opened_at ? escapeHtml(ticket.opened_at) : '';
     if (!ticket?.opened_today) {
@@ -26,13 +86,24 @@ const renderNativeChatRow = (chat) => {
         : '<span class="text-muted">0</span>';
     const lastMessage = chat?.last_message_at ? escapeHtml(chat.last_message_at) : '—';
     const contactName = escapeHtml(chat?.name ?? '');
+    const profileUrl = typeof chat?.profile_url === 'string' ? chat.profile_url : '';
+    const profileAttr = profileUrl ? ` data-profile-url="${escapeHtml(profileUrl)}"` : '';
+    const baseInitial = (chat?.name && chat.name.trim()) ? chat.name.trim() : (chat?.id ?? '');
+    const initial = escapeHtml((baseInitial || '#').charAt(0).toUpperCase() || '#');
 
     return `
         <tr>
             <td>
-                <strong>${name}</strong>
-                <div class="text-muted small">ID: ${remoteId}</div>
-                ${badge}
+                <div class="d-flex align-items-center gap-3">
+                    <div class="avatar avatar-sm"${profileAttr}>
+                        <span data-profile-fallback>${initial}</span>
+                    </div>
+                    <div>
+                        <strong>${name}</strong>
+                        <div class="text-muted small">ID: ${remoteId}</div>
+                        ${badge}
+                    </div>
+                </div>
             </td>
             <td>${unreadBadge}</td>
             <td>${lastMessage}</td>
@@ -101,6 +172,7 @@ export function initQueue(selector, endpoint, nativeConfig = {}) {
         }
 
         nativeBody.innerHTML = nativeState.chats.map((chat) => renderNativeChatRow(chat)).join('');
+        hydrateAvatars(nativeBody);
     };
 
     const fetchQueue = async () => {

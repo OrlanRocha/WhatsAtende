@@ -102,10 +102,15 @@ class TicketService
                 continue;
             }
 
+            $unread = (int) ($chat['unread'] ?? 0);
+            if ($unread <= 0) {
+                continue;
+            }
+
             $chats[] = $chat;
         }
 
-        $result['chats'] = $chats;
+        $result['chats'] = array_values($chats);
 
         return $result;
     }
@@ -208,8 +213,24 @@ class TicketService
         return $ticket;
     }
 
-    public function appendAgentMessage(int $ticketId, int $userId, string $body): void
+    /**
+     * @param array{path:string,url:string,mime:string,type:string,name:string}|null $attachment
+     */
+    public function appendAgentMessage(int $ticketId, int $userId, string $body, ?array $attachment = null): void
     {
+        $body = trim($body);
+        $mediaType = $this->normalizeMediaType($attachment['type'] ?? 'text');
+        $mediaUrl = $attachment['url'] ?? null;
+        $metadata = null;
+
+        if ($attachment !== null) {
+            $metadata = [
+                'source' => 'agent_upload',
+                'filename' => $attachment['name'] ?? null,
+                'mime_type' => $attachment['mime'] ?? null,
+            ];
+        }
+
         $integration = $this->settings->integrationSettings();
         if (($integration['integration_mode'] ?? 'webhook') === 'native') {
             $contactExternalId = $this->getContactExternalId($ticketId);
@@ -222,32 +243,46 @@ class TicketService
                 throw new RuntimeException('Contato não possui identificador externo para envio via Evolution.');
             }
 
-            $result = $this->evolution->sendText($contactExternalId, $body);
-            if (!$result['success']) {
+            if ($attachment !== null) {
+                $sendResult = $this->evolution->sendMedia($contactExternalId, $attachment['path'], [
+                    'caption' => $body,
+                    'filename' => $attachment['name'] ?? null,
+                    'mime_type' => $attachment['mime'] ?? null,
+                    'type' => $mediaType === 'file' ? 'document' : $mediaType,
+                ]);
+            } else {
+                $sendResult = $this->evolution->sendText($contactExternalId, $body);
+            }
+
+            if (!$sendResult['success']) {
                 $this->logger->error('ticket.native_send_failed', [
                     'ticket_id' => $ticketId,
                     'user_id' => $userId,
                     'contact' => $contactExternalId,
-                    'error' => $result['error'],
+                    'error' => $sendResult['error'],
+                    'media_type' => $mediaType,
                 ]);
 
-                throw new RuntimeException($result['error'] ?? 'Falha ao enviar mensagem via Evolution.');
+                throw new RuntimeException($sendResult['error'] ?? 'Falha ao enviar mensagem via Evolution.');
             }
         }
 
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
         $stmt = $this->connection->prepare(
-            'INSERT INTO messages (ticket_id, sender_type, user_id, body, media_type)
-             VALUES (:ticket_id, :sender_type, :user_id, :body, :media_type)'
+            'INSERT INTO messages (ticket_id, sender_type, user_id, body, media_type, media_url, metadata, sent_at) '
+            . 'VALUES (:ticket_id, :sender_type, :user_id, :body, :media_type, :media_url, :metadata, :sent_at)'
         );
         $stmt->execute([
             'ticket_id' => $ticketId,
             'sender_type' => 'agent',
             'user_id' => $userId,
-            'body' => $body,
-            'media_type' => 'text',
+            'body' => $body !== '' ? $body : null,
+            'media_type' => $mediaType,
+            'media_url' => $mediaUrl,
+            'metadata' => $metadata !== null ? (json_encode($metadata, JSON_UNESCAPED_UNICODE) ?: null) : null,
+            'sent_at' => $now,
         ]);
 
-        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
         $this->connection->prepare(
             'UPDATE ticket_metrics SET last_response_at = :now, first_response_at = COALESCE(first_response_at, :now) WHERE ticket_id = :ticket_id'
         )->execute([
@@ -258,6 +293,7 @@ class TicketService
         $this->logger->info('ticket.agent_response', [
             'ticket_id' => $ticketId,
             'user_id' => $userId,
+            'media_type' => $mediaType,
             'message' => 'Mensagem do atendente registrada.',
         ]);
     }
@@ -288,6 +324,8 @@ class TicketService
         ]);
 
         $this->logger->info('ticket.resolved', ['ticket_id' => $ticketId]);
+
+        $this->sendClosureSurvey($ticketId);
     }
 
     /**
@@ -319,6 +357,23 @@ class TicketService
         }
 
         $normalizedNative = $this->normalizeNativeMessages($ticket, $native['messages'] ?? []);
+        $normalizedNative = $this->filterNativeMessagesByTicket($ticket, $normalizedNative);
+
+        if ($normalizedNative !== []) {
+            try {
+                $this->persistNativeMessages(
+                    (int) ($ticket['id'] ?? 0),
+                    isset($ticket['contact_id']) ? (int) $ticket['contact_id'] : null,
+                    $normalizedNative
+                );
+            } catch (Throwable $exception) {
+                $this->logger->error('ticket.native_history_persist_failed', [
+                    'ticket_id' => $ticket['id'] ?? null,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        }
+
         if ($normalizedNative === []) {
             return $normalizedDb;
         }
@@ -362,8 +417,10 @@ class TicketService
                 'sender_type' => $message['sender_type'] ?? 'contact',
                 'user_id' => $message['user_id'] ?? null,
                 'body' => (string) ($message['body'] ?? ''),
-                'media_type' => $message['media_type'] ?? 'text',
-                'media_url' => $message['media_url'] ?? null,
+                'media_type' => $this->normalizeMediaType($message['media_type'] ?? 'text'),
+                'media_url' => isset($message['media_url']) && $message['media_url'] !== null
+                    ? (string) $message['media_url']
+                    : null,
                 'sent_at' => isset($message['sent_at']) ? (string) $message['sent_at'] : null,
                 'agent_name' => $message['agent_name'] ?? null,
                 'status' => $message['status'] ?? null,
@@ -419,12 +476,13 @@ class TicketService
                 'sender_type' => $fromMe ? 'agent' : 'contact',
                 'user_id' => $fromMe ? $assignedUserId : null,
                 'body' => (string) ($message['body'] ?? ''),
-                'media_type' => $message['media_type'] ?? 'text',
+                'media_type' => $this->normalizeMediaType($message['media_type'] ?? 'text'),
                 'media_url' => $message['media_url'] ?? null,
                 'sent_at' => $sentAt,
                 'agent_name' => $fromMe ? ($agentName ?: 'Você') : null,
                 'status' => $message['status'] ?? null,
                 'raw' => $message['raw'] ?? null,
+                'from_me' => $fromMe,
             ];
         }
 
@@ -443,6 +501,121 @@ class TicketService
     }
 
     /**
+     * @param array<string, mixed> $ticket
+     * @param array<int, array<string, mixed>> $messages
+     * @return array<int, array<string, mixed>>
+     */
+    private function filterNativeMessagesByTicket(array $ticket, array $messages): array
+    {
+        $openedAt = $ticket['opened_at'] ?? null;
+        if (!is_string($openedAt) || $openedAt === '') {
+            return $messages;
+        }
+
+        try {
+            $opened = new DateTimeImmutable($openedAt);
+        } catch (Throwable $exception) {
+            $this->logger->warning('ticket.native_history_filter_failed', [
+                'ticket_id' => $ticket['id'] ?? null,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return $messages;
+        }
+
+        return array_values(array_filter($messages, static function (array $message) use ($opened): bool {
+            $sentAt = $message['sent_at'] ?? null;
+            if (!is_string($sentAt) || $sentAt === '') {
+                return false;
+            }
+
+            try {
+                $sent = new DateTimeImmutable($sentAt);
+            } catch (Throwable $exception) {
+                return false;
+            }
+
+            return $sent >= $opened;
+        }));
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $messages
+     */
+    private function persistNativeMessages(int $ticketId, ?int $contactId, array $messages): void
+    {
+        if ($ticketId <= 0 || $messages === []) {
+            return;
+        }
+
+        $select = $this->connection->prepare(
+            'SELECT id FROM messages WHERE ticket_id = :ticket_id AND metadata IS NOT NULL'
+            . ' AND JSON_EXTRACT(metadata, "$.remote_id") = :remote_id LIMIT 1'
+        );
+        $insert = $this->connection->prepare(
+            'INSERT INTO messages (ticket_id, sender_type, user_id, body, media_type, media_url, metadata, sent_at) '
+            . 'VALUES (:ticket_id, :sender_type, NULL, :body, :media_type, :media_url, :metadata, :sent_at)'
+        );
+
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+        $updatedContact = false;
+        $latestSentAt = null;
+
+        foreach ($messages as $message) {
+            if (!empty($message['from_me'])) {
+                continue;
+            }
+
+            $remoteId = $message['id'] ?? null;
+            if (!is_string($remoteId) || $remoteId === '') {
+                continue;
+            }
+
+            $sentAt = $message['sent_at'] ?? null;
+            if (!is_string($sentAt) || $sentAt === '') {
+                continue;
+            }
+
+            $select->execute([
+                'ticket_id' => $ticketId,
+                'remote_id' => $remoteId,
+            ]);
+
+            if ($select->fetchColumn()) {
+                continue;
+            }
+
+            $metadata = json_encode([
+                'remote_id' => $remoteId,
+                'status' => $message['status'] ?? null,
+                'source' => 'evolution_native',
+            ], JSON_UNESCAPED_UNICODE) ?: null;
+
+            $insert->execute([
+                'ticket_id' => $ticketId,
+                'sender_type' => 'contact',
+                'body' => isset($message['body']) && $message['body'] !== '' ? (string) $message['body'] : null,
+                'media_type' => $this->normalizeMediaType($message['media_type'] ?? 'text'),
+                'media_url' => $message['media_url'] ?? null,
+                'metadata' => $metadata,
+                'sent_at' => $sentAt,
+            ]);
+
+            $updatedContact = true;
+            if ($latestSentAt === null || strcmp($sentAt, $latestSentAt) > 0) {
+                $latestSentAt = $sentAt;
+            }
+        }
+
+        if ($updatedContact && $contactId !== null) {
+            $this->connection->prepare('UPDATE contacts SET last_interaction_at = :now WHERE id = :id')->execute([
+                'now' => $latestSentAt ?? $now,
+                'id' => $contactId,
+            ]);
+        }
+    }
+
+    /**
      * @param array<string, mixed> $message
      */
     private function messageSignature(array $message): string
@@ -452,10 +625,86 @@ class TicketService
             (string) ($message['sent_at'] ?? ''),
             (string) ($message['sender_type'] ?? ''),
             (string) ($message['body'] ?? ''),
+            (string) ($message['media_type'] ?? ''),
             (string) ($message['media_url'] ?? ''),
         ];
 
         return md5(implode('|', $parts));
+    }
+
+    private function sendClosureSurvey(int $ticketId): void
+    {
+        $integration = $this->settings->integrationSettings();
+        if (($integration['integration_mode'] ?? 'webhook') !== 'native' || !$this->evolution->isNativeEnabled()) {
+            return;
+        }
+
+        $contactExternalId = $this->getContactExternalId($ticketId);
+        if ($contactExternalId === null) {
+            return;
+        }
+
+        $configured = $this->settings->get('ticket_closure_message');
+        $message = trim((string) ($configured ?? ''));
+        if ($message === '') {
+            $message = 'Agradecemos seu contato! Conte com a gente sempre que precisar. Avalie nosso atendimento respondendo com uma nota de 1 a 5.';
+        }
+
+        try {
+            $result = $this->evolution->sendText($contactExternalId, $message);
+            if (!$result['success']) {
+                $this->logger->warning('ticket.closure_message_failed', [
+                    'ticket_id' => $ticketId,
+                    'contact' => $contactExternalId,
+                    'error' => $result['error'] ?? 'Falha ao enviar mensagem de encerramento.',
+                ]);
+            }
+            if ($result['success']) {
+                $this->logger->info('ticket.closure_message_sent', [
+                    'ticket_id' => $ticketId,
+                    'contact' => $contactExternalId,
+                ]);
+            }
+
+            $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+            $metadata = [
+                'automation' => 'ticket_closure',
+                'success' => $result['success'],
+            ];
+            if (!$result['success'] && isset($result['error'])) {
+                $metadata['error'] = $result['error'];
+            }
+
+            $this->connection->prepare(
+                'INSERT INTO messages (ticket_id, sender_type, user_id, body, media_type, media_url, metadata, sent_at) '
+                . 'VALUES (:ticket_id, :sender_type, NULL, :body, :media_type, NULL, :metadata, :sent_at)'
+            )->execute([
+                'ticket_id' => $ticketId,
+                'sender_type' => 'system',
+                'body' => $message,
+                'media_type' => 'text',
+                'metadata' => json_encode($metadata, JSON_UNESCAPED_UNICODE) ?: null,
+                'sent_at' => $now,
+            ]);
+        } catch (Throwable $exception) {
+            $this->logger->error('ticket.closure_message_store_failed', [
+                'ticket_id' => $ticketId,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    private function normalizeMediaType(?string $type): string
+    {
+        $normalized = strtolower((string) $type);
+
+        return match ($normalized) {
+            'image', 'photo', 'sticker' => 'image',
+            'audio', 'ptt', 'voice' => 'audio',
+            'video' => 'video',
+            'file', 'document', 'application', 'doc', 'pdf' => 'file',
+            default => 'text',
+        };
     }
 
     /**

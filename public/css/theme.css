@@ -69,6 +69,17 @@ body.app-body {
     color: #fff;
 }
 
+.message .bubble audio,
+.message .bubble video {
+    width: 100%;
+    border-radius: .75rem;
+    margin-top: .25rem;
+}
+
+.message .bubble a.btn-outline-secondary {
+    margin-top: .25rem;
+}
+
 .template-list {
     max-height: 24rem;
     overflow-y: auto;
@@ -87,6 +98,52 @@ body.app-body {
 [data-bs-theme="dark"] .template-card {
     background: rgba(33, 37, 41, 0.9);
     border-color: rgba(13, 110, 253, 0.25);
+}
+
+.avatar {
+    width: 3rem;
+    height: 3rem;
+    border-radius: 50%;
+    background-color: rgba(13, 110, 253, 0.12);
+    color: var(--bs-secondary-color);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    text-transform: uppercase;
+    background-size: cover;
+    background-position: center;
+}
+
+.avatar.avatar-sm {
+    width: 2.5rem;
+    height: 2.5rem;
+    font-size: .95rem;
+}
+
+.avatar.avatar-lg {
+    width: 3.5rem;
+    height: 3.5rem;
+    font-size: 1.2rem;
+}
+
+.avatar-has-image span[data-profile-fallback] {
+    display: none;
+}
+
+.avatar-empty {
+    background-color: rgba(108, 117, 125, 0.15);
+    color: rgba(73, 80, 87, 0.8);
+}
+
+[data-bs-theme="dark"] .avatar {
+    background-color: rgba(64, 123, 255, 0.25);
+    color: rgba(233, 236, 239, 0.9);
+}
+
+[data-bs-theme="dark"] .avatar-empty {
+    background-color: rgba(73, 80, 87, 0.35);
+    color: rgba(222, 226, 230, 0.85);
 }
 
 [data-bs-theme="dark"] body.app-body {

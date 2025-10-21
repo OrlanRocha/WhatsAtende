@@ -341,6 +341,91 @@ class EvolutionService
     /**
      * @return array{success:bool,status:int,error:?string}
      */
+    public function sendMedia(string $contactExternalId, string $filePath, array $options = []): array
+    {
+        $config = $this->getNativeConfig();
+        if ($config === null) {
+            return [
+                'success' => false,
+                'status' => 409,
+                'error' => 'Integração nativa não está configurada.',
+            ];
+        }
+
+        if (!is_file($filePath) || !is_readable($filePath)) {
+            return [
+                'success' => false,
+                'status' => 400,
+                'error' => 'Arquivo de mídia indisponível para envio.',
+            ];
+        }
+
+        $contents = file_get_contents($filePath);
+        if ($contents === false) {
+            return [
+                'success' => false,
+                'status' => 500,
+                'error' => 'Falha ao ler o arquivo de mídia.',
+            ];
+        }
+
+        $caption = isset($options['caption']) ? $this->sanitizeMessageBody((string) $options['caption']) : '';
+        $fileName = isset($options['filename']) && is_string($options['filename']) && $options['filename'] !== ''
+            ? $options['filename']
+            : basename($filePath);
+        $mime = isset($options['mime_type']) && is_string($options['mime_type']) && $options['mime_type'] !== ''
+            ? $options['mime_type']
+            : ($this->detectMime($filePath) ?? 'application/octet-stream');
+        $mediaType = isset($options['type']) && is_string($options['type']) && $options['type'] !== ''
+            ? strtolower($options['type'])
+            : 'auto';
+
+        $payload = [
+            'number' => $this->sanitizeContactNumber($contactExternalId),
+            'mediaData' => base64_encode($contents),
+            'mimetype' => $mime,
+            'fileName' => $fileName,
+            'caption' => $caption,
+            'type' => $mediaType,
+        ];
+
+        if ($payload['caption'] === '') {
+            unset($payload['caption']);
+        }
+
+        $response = $this->makeRequest($config, 'POST', '/message/sendMedia/' . $config['instance'], $payload);
+        if (!($response['success'] ?? false)) {
+            $errorMessage = $this->buildSendErrorMessage($response);
+
+            $this->logger->error('evolution.media_send_failed', [
+                'contact' => $contactExternalId,
+                'status' => $response['status'] ?? 500,
+                'error' => $errorMessage,
+            ]);
+
+            return [
+                'success' => false,
+                'status' => (int) ($response['status'] ?? 500),
+                'error' => $errorMessage,
+            ];
+        }
+
+        $this->logger->info('evolution.media_sent', [
+            'contact' => $contactExternalId,
+            'filename' => $fileName,
+            'mime_type' => $mime,
+        ]);
+
+        return [
+            'success' => true,
+            'status' => (int) ($response['status'] ?? 200),
+            'error' => null,
+        ];
+    }
+
+    /**
+     * @return array{success:bool,status:int,error:?string}
+     */
     public function sendText(string $contactExternalId, string $message, array $options = []): array
     {
         $payload = array_merge($options, [
@@ -559,6 +644,8 @@ class EvolutionService
             }
         }
 
+        $profileUrl = $id !== '' ? $this->buildProfileUrl($id) : null;
+
         return [
             'id' => $id,
             'name' => $name,
@@ -566,6 +653,7 @@ class EvolutionService
             'last_message_at' => $lastMessage,
             'created_at' => $createdAt,
             'opened_today' => $openedToday,
+            'profile_url' => $profileUrl,
             'raw' => $chat,
         ];
     }
@@ -767,25 +855,40 @@ class EvolutionService
                     $body = $caption;
                 }
             } elseif (isset($payload['documentMessage']) && is_array($payload['documentMessage'])) {
-                $mediaType = 'document';
+                $mediaType = 'file';
                 $mediaUrl = $this->buildMediaUrl($messageId);
                 $fileName = $payload['documentMessage']['fileName'] ?? null;
                 if (is_string($fileName) && trim($fileName) !== '') {
                     $body = $fileName;
                 }
             } elseif (isset($payload['stickerMessage']) && is_array($payload['stickerMessage'])) {
-                $mediaType = 'sticker';
+                $mediaType = 'image';
                 $mediaUrl = $this->buildMediaUrl($messageId);
             }
         }
 
         $body = trim((string) $body);
 
+        $mediaType = $this->normalizeMediaType($mediaType);
+
         return [
             'body' => $body,
             'media_type' => $mediaType,
             'media_url' => $mediaUrl,
         ];
+    }
+
+    private function normalizeMediaType(string $type): string
+    {
+        $normalized = strtolower($type);
+
+        return match ($normalized) {
+            'image', 'photo', 'sticker' => 'image',
+            'audio', 'ptt', 'voice' => 'audio',
+            'video' => 'video',
+            'file', 'document', 'application', 'doc', 'pdf' => 'file',
+            default => 'text',
+        };
     }
 
     /**
@@ -835,6 +938,11 @@ class EvolutionService
     private function buildMediaUrl(string $messageId): string
     {
         return '/api/evolution/media?messageId=' . rawurlencode($messageId);
+    }
+
+    private function buildProfileUrl(string $remoteJid): string
+    {
+        return '/api/evolution/profile?remoteJid=' . rawurlencode($remoteJid);
     }
 
     private function extractTimestamp(mixed $value): ?string

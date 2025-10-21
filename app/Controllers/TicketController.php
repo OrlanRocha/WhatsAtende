@@ -202,17 +202,31 @@ class TicketController
             return;
         }
         $body = trim($_POST['message'] ?? '');
-        if ($body === '') {
+        try {
+            $attachment = $this->prepareAttachment($ticketId);
+        } catch (InvalidArgumentException $exception) {
             http_response_code(422);
             header('Content-Type: application/json');
-            echo json_encode(['error' => 'Message body is required.']);
+            echo json_encode(['error' => $exception->getMessage()]);
+            return;
+        } catch (RuntimeException $exception) {
+            http_response_code(400);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => $exception->getMessage()]);
+            return;
+        }
+
+        if ($body === '' && $attachment === null) {
+            http_response_code(422);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'Informe uma mensagem ou selecione um arquivo para envio.']);
             return;
         }
 
         $userId = (int) $user->id;
 
         try {
-            $this->ticketService->appendAgentMessage($ticketId, $userId, $body);
+            $this->ticketService->appendAgentMessage($ticketId, $userId, $body, $attachment);
         } catch (RuntimeException $exception) {
             $this->logger->error('ticket.store_message_failed', [
                 'ticket_id' => $ticketId,
@@ -234,6 +248,113 @@ class TicketController
         }
 
         json_response(['message' => 'Mensagem enviada.']);
+    }
+
+    /**
+     * @return array{path:string,url:string,mime:string,type:string,name:string}|null
+     */
+    private function prepareAttachment(int $ticketId): ?array
+    {
+        if (!isset($_FILES['attachment']) || !is_array($_FILES['attachment'])) {
+            return null;
+        }
+
+        $file = $_FILES['attachment'];
+        $error = $file['error'] ?? UPLOAD_ERR_NO_FILE;
+        if ($error === UPLOAD_ERR_NO_FILE) {
+            return null;
+        }
+
+        if ($error !== UPLOAD_ERR_OK) {
+            throw new RuntimeException('Falha ao processar o upload do arquivo.');
+        }
+
+        $tmpPath = $file['tmp_name'] ?? '';
+        if (!is_string($tmpPath) || $tmpPath === '' || !is_uploaded_file($tmpPath)) {
+            throw new RuntimeException('Upload inválido recebido pelo servidor.');
+        }
+
+        $mime = mime_content_type($tmpPath) ?: 'application/octet-stream';
+        $type = $this->detectMediaType($mime);
+        if ($type === null) {
+            throw new InvalidArgumentException('Apenas arquivos de imagem, áudio ou vídeo são suportados.');
+        }
+
+        $extension = $this->guessExtension($mime, $type);
+        $directory = base_path('public/uploads/tickets/' . $ticketId);
+        if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
+            throw new RuntimeException('Não foi possível preparar o diretório de anexos.');
+        }
+
+        try {
+            $filename = bin2hex(random_bytes(12)) . ($extension !== '' ? '.' . $extension : '');
+        } catch (Throwable $exception) {
+            throw new RuntimeException('Não foi possível preparar o arquivo para envio.');
+        }
+        $destination = rtrim($directory, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $filename;
+
+        if (!move_uploaded_file($tmpPath, $destination)) {
+            throw new RuntimeException('Falha ao armazenar o anexo enviado.');
+        }
+
+        $publicUrl = '/uploads/tickets/' . $ticketId . '/' . $filename;
+
+        return [
+            'path' => $destination,
+            'url' => $publicUrl,
+            'mime' => $mime,
+            'type' => $type,
+            'name' => is_string($file['name'] ?? null) ? (string) $file['name'] : $filename,
+        ];
+    }
+
+    private function detectMediaType(string $mime): ?string
+    {
+        $mime = strtolower($mime);
+        if (str_starts_with($mime, 'image/')) {
+            return 'image';
+        }
+
+        if (str_starts_with($mime, 'audio/')) {
+            return 'audio';
+        }
+
+        if (str_starts_with($mime, 'video/')) {
+            return 'video';
+        }
+
+        return null;
+    }
+
+    private function guessExtension(string $mime, string $type): string
+    {
+        $map = [
+            'image/jpeg' => 'jpg',
+            'image/png' => 'png',
+            'image/gif' => 'gif',
+            'image/webp' => 'webp',
+            'audio/mpeg' => 'mp3',
+            'audio/ogg' => 'ogg',
+            'audio/wav' => 'wav',
+            'audio/webm' => 'webm',
+            'audio/mp4' => 'm4a',
+            'audio/aac' => 'aac',
+            'video/mp4' => 'mp4',
+            'video/ogg' => 'ogv',
+            'video/webm' => 'webm',
+            'video/quicktime' => 'mov',
+        ];
+
+        if (isset($map[$mime])) {
+            return $map[$mime];
+        }
+
+        return match ($type) {
+            'image' => 'jpg',
+            'audio' => 'mp3',
+            'video' => 'mp4',
+            default => '',
+        };
     }
 
 
