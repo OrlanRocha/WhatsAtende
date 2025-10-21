@@ -410,7 +410,7 @@ class TicketService
      */
     private function normalizeDatabaseMessages(array $messages): array
     {
-        $normalized = array_map(static function (array $message): array {
+        $normalized = array_map(function (array $message): array {
             return [
                 'id' => $message['id'] ?? null,
                 'ticket_id' => $message['ticket_id'] ?? null,
