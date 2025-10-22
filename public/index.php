@@ -12,6 +12,7 @@ use App\Controllers\Admin\WebhookController as AdminWebhookController;
 use App\Controllers\Api\EvolutionController as ApiEvolutionController;
 use App\Controllers\AuthController;
 use App\Controllers\TicketController;
+use App\Controllers\HealthController;
 use App\Controllers\WebhookController;
 use App\Services\AuthService;
 use App\Services\DashboardService;
@@ -21,6 +22,7 @@ use App\Services\LoginThrottleService;
 use App\Services\SettingService;
 use App\Services\TemplateService;
 use App\Services\TicketService;
+use App\Services\HealthService;
 use App\Services\UserService;
 use App\Services\WebhookService;
 
@@ -96,6 +98,7 @@ container_bind(UserService::class, static fn () => new UserService(resolve(\PDO:
 container_bind(TemplateService::class, static fn () => new TemplateService(resolve(\PDO::class), resolve(LoggerService::class)));
 container_bind(SettingService::class, static fn () => new SettingService(resolve(\PDO::class), resolve(LoggerService::class)));
 container_bind(EvolutionService::class, static fn () => new EvolutionService(resolve(SettingService::class), resolve(LoggerService::class)));
+container_bind(HealthService::class, static fn () => new HealthService(resolve(EvolutionService::class), resolve(\PDO::class)));
 container_bind(TicketService::class, static fn () => new TicketService(
     resolve(\PDO::class),
     resolve(LoggerService::class),
@@ -114,6 +117,7 @@ container_bind(AdminLogController::class, static fn () => new AdminLogController
 container_bind(AdminWebhookController::class, static fn () => new AdminWebhookController(resolve(SettingService::class), resolve(EvolutionService::class)));
 container_bind(AdminEvolutionController::class, static fn () => new AdminEvolutionController(resolve(EvolutionService::class)));
 container_bind(ApiEvolutionController::class, static fn () => new ApiEvolutionController(resolve(EvolutionService::class)));
+container_bind(HealthController::class, static fn () => new HealthController(resolve(HealthService::class)));
 
 $routes = require base_path('routes/web.php');
 

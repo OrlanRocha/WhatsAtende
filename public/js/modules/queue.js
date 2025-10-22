@@ -1,4 +1,4 @@
-import { request, showToast, confirmAction, initTable } from '/js/app.js';
+import { request, showToast, initTable } from '/js/app.js';
 
 const escapeHtml = (value) => {
     const div = document.createElement('div');
@@ -71,21 +71,49 @@ const renderOpenedAt = (ticket) => {
     if (!ticket?.opened_today) {
         return opened;
     }
-    return `${opened} <span class="badge bg-success-subtle text-success ms-1">Hoje</span>`;
+    return `${opened} <span class="badge badge--today">Hoje</span>`;
+};
+
+const renderSlaBadge = (ticket) => {
+    const status = ticket?.sla_status ?? 'unset';
+    if (status === 'breach') {
+        return '<span class="status-badge status-badge--critical">SLA</span>';
+    }
+    if (status === 'warning') {
+        return '<span class="status-badge status-badge--warning">SLA</span>';
+    }
+    if (status === 'ok') {
+        return '<span class="status-badge status-badge--assigned">Em dia</span>';
+    }
+    return '<span class="status-badge">Sem SLA</span>';
+};
+
+const formatKanbanCard = (ticket) => {
+    return `
+        <article class="template-card">
+            <div class="template-card__content">
+                <h4>#${escapeHtml(String(ticket.id ?? ''))}</h4>
+                <p class="mb-1">${escapeHtml(ticket.contact_name ?? 'Contato')}</p>
+                <small class="text-muted">${renderOpenedAt(ticket)}</small>
+            </div>
+            <div class="template-card__actions">
+                <button class="btn btn-sm btn-outline-primary" data-assign data-ticket="${escapeHtml(String(ticket.id ?? ''))}">
+                    <i class="bi bi-headset"></i>
+                </button>
+            </div>
+        </article>`;
 };
 
 const renderNativeChatRow = (chat) => {
     const remoteId = escapeHtml(chat?.id ?? '');
     const name = chat?.name ? escapeHtml(chat.name) : remoteId;
     const badge = chat?.opened_today
-        ? '<span class="badge bg-success-subtle text-success ms-1">Hoje</span>'
+        ? '<span class="badge badge--today">Hoje</span>'
         : '';
     const unreadCount = Number.isFinite(chat?.unread) ? chat.unread : parseInt(chat?.unread ?? 0, 10) || 0;
     const unreadBadge = unreadCount > 0
-        ? `<span class="badge text-bg-warning text-dark">${unreadCount}</span>`
+        ? `<span class="status-badge status-badge--warning">${unreadCount}</span>`
         : '<span class="text-muted">0</span>';
-    const lastMessage = chat?.last_message_at ? escapeHtml(chat.last_message_at) : '—';
-    const contactName = escapeHtml(chat?.name ?? '');
     const profileUrl = typeof chat?.profile_url === 'string' ? chat.profile_url : '';
     const profileAttr = profileUrl ? ` data-profile-url="${escapeHtml(profileUrl)}"` : '';
     const baseInitial = (chat?.name && chat.name.trim()) ? chat.name.trim() : (chat?.id ?? '');
@@ -106,14 +134,82 @@ const renderNativeChatRow = (chat) => {
                 </div>
             </td>
             <td>${unreadBadge}</td>
-            <td>${lastMessage}</td>
+            <td>${chat?.last_message_at ? escapeHtml(chat.last_message_at) : '—'}</td>
             <td class="text-end">
-                <button class="btn btn-sm btn-primary" data-start-native data-remote="${remoteId}" data-name="${contactName}">
+                <button class="btn btn-sm btn-primary" data-start-native data-remote="${remoteId}" data-name="${escapeHtml(chat?.name ?? '')}">
                     <i class="bi bi-chat-dots"></i> Iniciar conversa
                 </button>
             </td>
         </tr>
     `;
+};
+
+const updateMetrics = (container, summary = {}) => {
+    if (!container) {
+        return;
+    }
+    container.querySelectorAll('[data-summary]').forEach((metric) => {
+        const key = metric.getAttribute('data-summary');
+        if (!key) {
+            return;
+        }
+        const value = summary[key] ?? 0;
+        const target = metric.querySelector('.metric-value');
+        if (target) {
+            target.textContent = value;
+        }
+    });
+};
+
+const renderQueueTable = (table, queue = []) => {
+    if (!table) {
+        return;
+    }
+    const tbody = table.querySelector('tbody');
+    if (!tbody) {
+        return;
+    }
+    tbody.innerHTML = queue.map((ticket) => `
+        <tr>
+            <td class="fw-semibold">#${escapeHtml(String(ticket.id ?? ''))}</td>
+            <td>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="presence-indicator" data-presence="${ticket?.presence ?? 'offline'}" aria-hidden="true"></span>
+                    <div>
+                        <div class="fw-semibold">${escapeHtml(ticket.contact_name ?? 'Contato')}</div>
+                        <small class="text-muted">${escapeHtml(ticket.channel ?? 'whatsapp')}</small>
+                    </div>
+                </div>
+            </td>
+            <td>${escapeHtml(ticket.channel ?? 'whatsapp')}</td>
+            <td><span class="status-badge status-badge--${escapeHtml(ticket.status ?? 'open')}">${escapeHtml(ticket.status ?? 'open')}</span></td>
+            <td>${renderSlaBadge(ticket)}</td>
+            <td>${renderOpenedAt(ticket)}</td>
+            <td class="text-end">
+                <button class="btn btn-success btn-sm" data-assign data-ticket="${escapeHtml(String(ticket.id ?? ''))}">
+                    <i class="bi bi-headset"></i> Iniciar
+                </button>
+            </td>
+        </tr>
+    `).join('');
+};
+
+const renderKanban = (board, tickets = []) => {
+    if (!board) {
+        return;
+    }
+    const columns = board.querySelectorAll('[data-kanban-list]');
+    columns.forEach((column) => {
+        column.innerHTML = '';
+    });
+    tickets.forEach((ticket) => {
+        const target = board.querySelector(`[data-kanban-list="${ticket.status ?? 'open'}"]`)
+            || board.querySelector('[data-kanban-list="open"]');
+        if (!target) {
+            return;
+        }
+        target.insertAdjacentHTML('beforeend', formatKanbanCard(ticket));
+    });
 };
 
 export function initQueue(selector, endpoint, nativeConfig = {}) {
@@ -128,12 +224,27 @@ export function initQueue(selector, endpoint, nativeConfig = {}) {
     const nativeBody = nativeContainer?.querySelector('[data-native-body]');
     const nativeError = nativeContainer?.querySelector('[data-native-error]');
     const nativeCount = nativeContainer?.querySelector('[data-native-count]');
+    const viewToggles = container.querySelectorAll('[data-view-toggle]');
+    const tablePanel = container.querySelector('[data-view="table"]');
+    const kanbanPanel = container.querySelector('[data-view="kanban"]');
+    const kanbanBoard = container.querySelector('[data-kanban]');
+    const metrics = container.querySelector('[data-log-metrics]') || container.querySelector('.workspace-metrics');
+    const savedFilters = container.querySelectorAll('[data-saved-filter]');
+    const densityToggle = container.querySelector('[data-density-toggle]');
+    const searchInput = container.querySelector('[data-queue-search]');
 
     const nativeState = {
         enabled: !!(nativeConfig?.enabled),
         chats: Array.isArray(nativeConfig?.chats) ? nativeConfig.chats : [],
         error: nativeConfig?.error ?? null,
         startEndpoint: nativeConfig?.startEndpoint || '/tickets/native/start',
+    };
+
+    const queueState = {
+        status: null,
+        mine: false,
+        hide_resolved: true,
+        search: '',
     };
 
     const renderNative = () => {
@@ -159,122 +270,171 @@ export function initQueue(selector, endpoint, nativeConfig = {}) {
         }
 
         if (nativeCount) {
-            nativeCount.textContent = `Disponíveis: ${nativeState.chats.length}`;
+            nativeCount.textContent = `${nativeState.chats.length} pendentes`;
         }
 
         if (!nativeBody) {
             return;
         }
 
-        if (!nativeState.chats.length) {
-            nativeBody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">Nenhuma conversa pendente.</td></tr>';
-            return;
-        }
-
-        nativeBody.innerHTML = nativeState.chats.map((chat) => renderNativeChatRow(chat)).join('');
+        renderNativeChats(nativeBody, nativeState.chats);
         hydrateAvatars(nativeBody);
     };
 
-    const fetchQueue = async () => {
+    renderNative();
+
+    const applyView = (view) => {
+        viewToggles.forEach((button) => {
+            button.classList.toggle('active', button.getAttribute('data-view-toggle') === view);
+        });
+        if (view === 'kanban') {
+            tablePanel?.setAttribute('hidden', 'true');
+            kanbanPanel?.removeAttribute('hidden');
+        } else {
+            kanbanPanel?.setAttribute('hidden', 'true');
+            tablePanel?.removeAttribute('hidden');
+        }
+    };
+
+    viewToggles.forEach((button) => {
+        button.addEventListener('click', () => {
+            applyView(button.getAttribute('data-view-toggle') || 'table');
+        });
+    });
+
+    const applyDensity = () => {
         if (!table) {
             return;
         }
-        try {
-            const data = await request(endpoint, { method: 'GET' });
-            const queue = data?.queue ?? [];
-            const tbody = table.querySelector('tbody');
-            if (!tbody) {
-                return;
-            }
-            tbody.innerHTML = queue.map((ticket) => `
-                <tr>
-                    <td>#${ticket.id}</td>
-                    <td>${escapeHtml(ticket.contact_name)}</td>
-                    <td>${escapeHtml(ticket.channel)}</td>
-                    <td><span class="badge bg-secondary text-capitalize">${escapeHtml(ticket.status)}</span></td>
-                    <td>${renderOpenedAt(ticket)}</td>
-                    <td class="text-end">
-                        <button class="btn btn-sm btn-success" data-assign data-ticket="${ticket.id}">
-                            <i class="bi bi-headset"></i> Iniciar atendimento
-                        </button>
-                    </td>
-                </tr>`).join('');
-            initTable(table);
+        const currentDensity = table.getAttribute('data-density') === 'compact' ? 'compact' : 'comfortable';
+        const next = currentDensity === 'compact' ? 'comfortable' : 'compact';
+        table.setAttribute('data-density', next);
+        densityToggle?.classList.toggle('btn-primary', next === 'compact');
+    };
 
-            if (data?.native) {
-                if (typeof data.native.enabled === 'boolean') {
-                    nativeState.enabled = data.native.enabled;
-                }
-                nativeState.chats = Array.isArray(data.native.chats) ? data.native.chats : [];
-                nativeState.error = data.native.error ?? null;
+    densityToggle?.addEventListener('click', applyDensity);
+
+    savedFilters.forEach((button) => {
+        button.addEventListener('click', () => {
+            savedFilters.forEach((chip) => chip.classList.remove('is-active'));
+            button.classList.add('is-active');
+            try {
+                const payload = JSON.parse(button.getAttribute('data-saved-filter') || '{}');
+                queueState.status = payload.status ?? null;
+                queueState.mine = Boolean(payload.mine);
+                queueState.hide_resolved = payload.hide_resolved !== false;
+            } catch (error) {
+                // ignore invalid payloads
+            }
+            fetchQueue();
+        });
+    });
+
+    searchInput?.addEventListener('input', () => {
+        if (searchInput.dataset.timeoutId) {
+            clearTimeout(Number(searchInput.dataset.timeoutId));
+        }
+        const timeoutId = window.setTimeout(() => {
+            queueState.search = searchInput.value.trim();
+            fetchQueue();
+        }, 350);
+        searchInput.dataset.timeoutId = String(timeoutId);
+    });
+
+    const fetchQueue = async () => {
+        try {
+            const queueResponse = await request(endpoint, { method: 'GET' });
+            const tableData = queueResponse?.queue ?? [];
+            renderQueueTable(table, tableData);
+            hydrateAvatars(table);
+            initTable(table);
+            if (queueResponse?.native) {
+                nativeState.chats = queueResponse.native.chats ?? nativeState.chats;
+                nativeState.error = queueResponse.native.error ?? null;
+                nativeState.enabled = queueResponse.native.enabled ?? nativeState.enabled;
                 renderNative();
             }
         } catch (error) {
             showToast('Não foi possível atualizar a fila.', 'error');
         }
+
+        try {
+            const params = new URLSearchParams();
+            if (queueState.status) {
+                params.set('status', queueState.status);
+            }
+            if (queueState.mine) {
+                params.set('mine', '1');
+            }
+            if (queueState.hide_resolved) {
+                params.set('hide_resolved', '1');
+            }
+            if (queueState.search) {
+                params.set('q', queueState.search);
+            }
+            params.set('format', 'json');
+            const overview = await request(`/tickets/overview?${params.toString()}`);
+            updateMetrics(metrics, overview?.summary ?? {});
+            renderKanban(kanbanBoard, overview?.tickets ?? []);
+        } catch (error) {
+            updateMetrics(metrics, {});
+            renderKanban(kanbanBoard, []);
+        }
     };
 
     container.addEventListener('click', async (event) => {
-        const startButton = event.target instanceof HTMLElement ? event.target.closest('[data-start-native]') : null;
-        if (startButton) {
-            const remoteJid = startButton.getAttribute('data-remote');
-            if (!remoteJid) {
-                return;
-            }
-            const name = startButton.getAttribute('data-name') || '';
-            const confirmed = await confirmAction('Deseja iniciar uma nova conversa com este contato?', 'Sim, iniciar');
-            if (!confirmed) {
-                return;
-            }
-            try {
-                const response = await request(nativeState.startEndpoint, {
-                    method: 'POST',
-                    body: { remote_jid: remoteJid, name },
-                });
-                showToast(response?.message || 'Conversa iniciada com sucesso.');
-                nativeState.chats = nativeState.chats.filter((chat) => (chat?.id ?? '') !== remoteJid);
-                renderNative();
-                if (response?.redirect) {
-                    window.location.assign(response.redirect);
-                } else {
-                    fetchQueue();
-                }
-            } catch (error) {
-                showToast(error?.data?.error || error?.message || 'Não foi possível iniciar a conversa.', 'error');
-            }
+        const assignButton = event.target instanceof HTMLElement ? event.target.closest('[data-assign]') : null;
+        if (!assignButton) {
             return;
         }
-
-        const button = event.target instanceof HTMLElement ? event.target.closest('[data-assign]') : null;
-        if (!button) {
-            return;
-        }
-        const ticketId = button.getAttribute('data-ticket');
+        const ticketId = assignButton.getAttribute('data-ticket');
         if (!ticketId) {
             return;
         }
-        const confirmed = await confirmAction('Deseja assumir este atendimento?', 'Sim, iniciar');
-        if (!confirmed) {
-            return;
-        }
+        assignButton.disabled = true;
         try {
-            const data = await request(`${endpoint}/${ticketId}/assign`, { method: 'POST' });
-            showToast(data?.message || 'Chamado atribuído com sucesso.');
+            const data = await request(`/tickets/${ticketId}/assign`, { method: 'POST' });
+            showToast(data?.message || 'Chamado atribuído.');
             if (data?.redirect) {
                 window.location.assign(data.redirect);
-            } else {
-                fetchQueue();
+                return;
             }
+            fetchQueue();
         } catch (error) {
-            showToast(error?.data?.message || 'Não foi possível assumir o atendimento.', 'error');
+            showToast(error?.data?.message || 'Não foi possível atribuir o chamado.', 'error');
+        } finally {
+            assignButton.disabled = false;
         }
     });
 
-    if (refreshButton) {
-        refreshButton.addEventListener('click', fetchQueue);
-    }
+    container.addEventListener('click', async (event) => {
+        const startNative = event.target instanceof HTMLElement ? event.target.closest('[data-start-native]') : null;
+        if (!startNative) {
+            return;
+        }
+        startNative.disabled = true;
+       try {
+           const payload = {
+               remote_jid: startNative.getAttribute('data-remote') ?? '',
+               name: startNative.getAttribute('data-name') ?? '',
+           };
+           const data = await request(nativeState.startEndpoint, {
+               method: 'POST',
+               body: payload,
+           });
+           showToast('Conversa iniciada.');
+           if (data?.redirect) {
+               window.location.assign(data.redirect);
+           }
+            fetchQueue();
+        } catch (error) {
+            showToast(error?.data?.error || 'Não foi possível iniciar a conversa.', 'error');
+        } finally {
+            startNative.disabled = false;
+        }
+    });
 
-    renderNative();
+    refreshButton?.addEventListener('click', fetchQueue);
     fetchQueue();
     setInterval(fetchQueue, 10000);
 }

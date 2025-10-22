@@ -913,31 +913,115 @@ class TicketService
     }
 
     /**
+     * @param array<string, mixed>|string|null $filters
      * @return array<int, array<string, mixed>>
      */
-    public function listTickets(?string $status = null): array
+    public function listTickets(array|string|null $filters = null): array
     {
-        $sql = 'SELECT t.id, t.status, t.priority, t.opened_at, t.closed_at, t.channel, '
+        $options = [
+            'status' => null,
+            'priority' => null,
+            'assigned' => null,
+            'search' => null,
+            'exclude' => null,
+        ];
+
+        if (is_string($filters) && $filters !== '') {
+            $options['status'] = $filters;
+        } elseif (is_array($filters)) {
+            foreach ($options as $key => $value) {
+                if (array_key_exists($key, $filters)) {
+                    $options[$key] = $filters[$key];
+                }
+            }
+        }
+
+        $sql = 'SELECT t.id, t.status, t.priority, t.opened_at, t.closed_at, t.sla_due_at, t.channel, '
             . 'c.display_name AS contact_name, u.full_name AS agent_name '
             . 'FROM tickets t '
             . 'INNER JOIN contacts c ON c.id = t.contact_id '
             . 'LEFT JOIN users u ON u.id = t.assigned_user_id';
 
+        $conditions = [];
         $params = [];
-        if ($status !== null && $status !== '') {
-            $sql .= ' WHERE t.status = :status';
-            $params['status'] = $status;
+
+        if (!empty($options['status'])) {
+            $conditions[] = 't.status = :status';
+            $params['status'] = $options['status'];
+        }
+
+        if (!empty($options['priority'])) {
+            $conditions[] = 't.priority = :priority';
+            $params['priority'] = $options['priority'];
+        }
+
+        if (!empty($options['assigned']) && is_numeric($options['assigned'])) {
+            $conditions[] = 't.assigned_user_id = :assigned_user_id';
+            $params['assigned_user_id'] = (int) $options['assigned'];
+        }
+
+        if (!empty($options['exclude']) && is_array($options['exclude'])) {
+            $placeholders = [];
+            foreach ($options['exclude'] as $index => $status) {
+                $key = ':exclude_' . $index;
+                $placeholders[] = $key;
+                $params['exclude_' . $index] = $status;
+            }
+            if ($placeholders !== []) {
+                $conditions[] = 't.status NOT IN (' . implode(',', $placeholders) . ')';
+            }
+        }
+
+        if (!empty($options['search'])) {
+            $conditions[] = '(c.display_name LIKE :search OR CAST(t.id AS CHAR) LIKE :search)';
+            $params['search'] = '%' . trim((string) $options['search']) . '%';
+        }
+
+        if ($conditions !== []) {
+            $sql .= ' WHERE ' . implode(' AND ', $conditions);
         }
 
         $sql .= ' ORDER BY t.opened_at DESC';
 
         $stmt = $this->connection->prepare($sql);
-        if (isset($params['status'])) {
-            $stmt->bindValue(':status', $params['status']);
+        foreach ($params as $key => $value) {
+            $param = ':' . $key;
+            if ($key === 'assigned_user_id') {
+                $stmt->bindValue($param, (int) $value, PDO::PARAM_INT);
+                continue;
+            }
+
+            $stmt->bindValue($param, $value);
         }
         $stmt->execute();
 
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $now = new DateTimeImmutable('now');
+
+        return array_map(static function (array $row) use ($now): array {
+            $slaDue = $row['sla_due_at'] ?? null;
+            $row['sla_status'] = 'ok';
+            $row['sla_remaining'] = null;
+
+            if (is_string($slaDue) && $slaDue !== '') {
+                try {
+                    $due = new DateTimeImmutable($slaDue);
+                    $diff = $due->getTimestamp() - $now->getTimestamp();
+                    $row['sla_remaining'] = $diff;
+                    if ($diff <= 0) {
+                        $row['sla_status'] = 'breach';
+                    } elseif ($diff <= 3600) {
+                        $row['sla_status'] = 'warning';
+                    }
+                } catch (Throwable $exception) {
+                    $row['sla_status'] = 'unknown';
+                }
+            } else {
+                $row['sla_status'] = 'unset';
+            }
+
+            return $row;
+        }, $rows);
     }
 
     private function getContactExternalId(int $ticketId): ?string

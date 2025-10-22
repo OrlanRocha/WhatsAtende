@@ -11,6 +11,7 @@ use App\Controllers\Api\EvolutionController as ApiEvolutionController;
 use App\Controllers\AuthController;
 use App\Controllers\TicketController;
 use App\Controllers\WebhookController;
+use App\Controllers\HealthController;
 
 return [
     ['GET', '/', [TicketController::class, 'index']],
@@ -49,6 +50,7 @@ return [
     ['GET', '/reset-password/{token}', [AuthController::class, 'showResetPasswordForm']],
     ['POST', '/reset-password', [AuthController::class, 'resetPassword']],
     ['GET', '/tickets', [TicketController::class, 'index']],
+    ['GET', '/tickets/overview', [TicketController::class, 'overview']],
     ['GET', '/tickets/today', [TicketController::class, 'today']],
     ['GET', '/tickets/{id}', [TicketController::class, 'show']],
     ['POST', '/tickets/{id}/assign', [TicketController::class, 'assign']],
@@ -56,5 +58,6 @@ return [
     ['POST', '/tickets/{id}/messages', [TicketController::class, 'storeMessage']],
     ['GET', '/tickets/{id}/messages', [TicketController::class, 'messages']],
     ['POST', '/tickets/{id}/resolve', [TicketController::class, 'resolve']],
+    ['GET', '/health', [HealthController::class, 'snapshot']],
     ['POST', '/api/webhook', [WebhookController::class, 'handle']],
 ];

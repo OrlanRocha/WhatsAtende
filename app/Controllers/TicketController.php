@@ -45,6 +45,63 @@ class TicketController
         ]);
     }
 
+    public function overview(): void
+    {
+        $user = require_auth();
+
+        $status = filter_input(INPUT_GET, 'status', FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: null;
+        $priority = filter_input(INPUT_GET, 'priority', FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: null;
+        $search = filter_input(INPUT_GET, 'q', FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: null;
+        $mine = filter_input(INPUT_GET, 'mine', FILTER_VALIDATE_BOOL);
+        $excludeResolved = filter_input(INPUT_GET, 'hide_resolved', FILTER_VALIDATE_BOOL);
+
+        $filters = [];
+        if ($status) {
+            $filters['status'] = $status;
+        }
+        if ($priority) {
+            $filters['priority'] = $priority;
+        }
+        if ($search) {
+            $filters['search'] = $search;
+        }
+        if ($mine) {
+            $filters['assigned'] = (int) $user->id;
+        }
+        if ($excludeResolved) {
+            $filters['exclude'] = ['resolved', 'closed'];
+        }
+
+        $tickets = $this->ticketService->listTickets($filters);
+
+        $statusMap = [
+            'open' => 0,
+            'assigned' => 0,
+            'resolved' => 0,
+            'closed' => 0,
+            'waiting' => 0,
+            'breach' => 0,
+        ];
+
+        foreach ($tickets as $ticket) {
+            $statusKey = $ticket['status'] ?? 'open';
+            if (isset($statusMap[$statusKey])) {
+                $statusMap[$statusKey]++;
+            }
+            if (($ticket['status'] ?? '') === 'open' && empty($ticket['agent_name'])) {
+                $statusMap['waiting']++;
+            }
+            if (($ticket['sla_status'] ?? '') === 'breach') {
+                $statusMap['breach']++;
+            }
+        }
+
+        json_response([
+            'tickets' => $tickets,
+            'summary' => $statusMap,
+        ]);
+    }
+
     public function today(): void
     {
         require_auth();

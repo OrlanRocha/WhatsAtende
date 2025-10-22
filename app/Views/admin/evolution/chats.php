@@ -1,11 +1,15 @@
 <?php
 /** @var array<int, array<string, mixed>> $chats */
 /** @var string|null $error */
+$breadcrumbs = [
+    ['label' => 'Admin', 'href' => '/admin'],
+    ['label' => 'Evolution']
+];
 $pageTitle = 'Evolution · Chats · WhatsAtende';
 include base_path('app/Views/partials/layout-start.php');
-include base_path('app/Views/admin/partials/nav.php');
+include base_path('app/Views/partials/topbar.php');
 ?>
-<div class="container-xxl py-4" id="evolution-chats-page">
+<div class="workspace" id="evolution-chats-page">
     <div class="d-flex flex-column flex-lg-row justify-content-between align-items-start align-items-lg-center gap-3 mb-4">
         <div>
             <h1 class="h3 fw-semibold mb-1">Chats da Evolution</h1>
