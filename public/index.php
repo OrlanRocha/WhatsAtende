@@ -26,6 +26,7 @@ use App\Services\TicketService;
 use App\Services\HealthService;
 use App\Services\UserService;
 use App\Services\WebhookService;
+use App\Support\DatabaseBootstrapper;
 
 require __DIR__ . '/../app/bootstrap.php';
 
@@ -83,6 +84,8 @@ container_bind(\PDO::class, static function () use ($databaseConfig): \PDO {
     $pdo = new \PDO($dsn, $databaseConfig['username'], $databaseConfig['password'] ?? '');
     $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(\PDO::ATTR_DEFAULT_FETCH_MODE, \PDO::FETCH_ASSOC);
+
+    DatabaseBootstrapper::ensure($pdo);
 
     return $pdo;
 });

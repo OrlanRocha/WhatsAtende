@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Support\DatabaseBootstrapper;
 use DateTimeImmutable;
 use PDO;
 use PDOException;
@@ -105,6 +106,8 @@ class AuthService
         if ($fullName === '' || $normalizedEmail === '' || strlen($cpf) !== 11) {
             throw new RuntimeException('Dados inválidos para cadastro de usuário.');
         }
+
+        DatabaseBootstrapper::ensure($this->connection);
 
         $roleId ??= $this->resolveRoleId('agent');
         $passwordHash = password_hash($password, PASSWORD_DEFAULT);
@@ -308,7 +311,14 @@ class AuthService
         $roleId = $stmt->fetchColumn();
 
         if (!$roleId) {
-            throw new \RuntimeException('Role not configured: ' . $roleName);
+            DatabaseBootstrapper::ensure($this->connection);
+
+            $stmt->execute(['name' => $roleName]);
+            $roleId = $stmt->fetchColumn();
+
+            if (!$roleId) {
+                throw new \RuntimeException('Role not configured: ' . $roleName);
+            }
         }
 
         return (int) $roleId;
