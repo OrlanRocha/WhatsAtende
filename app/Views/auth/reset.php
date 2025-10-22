@@ -4,17 +4,31 @@
 /** @var string|null $status */
 /** @var string|null $error */
 $pageTitle = 'Definir nova senha · WhatsAtende';
-include base_path('app/Views/partials/layout-start.php');
+include base_path('app/Views/partials/layout-auth-start.php');
 ?>
-<div class="auth-hero d-flex align-items-center justify-content-center py-5">
-    <div class="auth-card shadow-lg border-0 w-100" style="max-width: 440px;">
-        <div class="card-body p-4 p-lg-5">
-            <div class="text-center mb-4">
-                <i class="bi bi-key text-info fs-1"></i>
-                <h1 class="h4 fw-semibold mt-2">Definir nova senha</h1>
-                <p class="text-muted">Redefinindo acesso para <strong><?= htmlspecialchars($email) ?></strong></p>
+<div class="auth-wrapper">
+    <section class="auth-showcase" aria-label="Orientações de redefinição">
+        <span class="auth-badge auth-badge--info">Atualize sua credencial</span>
+        <h1 class="auth-title">Defina uma nova senha com confiança</h1>
+        <p class="auth-subtitle">
+            Ao concluir, encerraremos sessões anteriores e enviaremos um alerta de segurança para o administrador.
+        </p>
+        <ul class="auth-feature-list">
+            <li><i class="bi bi-unlock" aria-hidden="true"></i> Senhas criptografadas com padrão moderno</li>
+            <li><i class="bi bi-hourglass-split" aria-hidden="true"></i> Token válido por tempo limitado</li>
+            <li><i class="bi bi-chat-text" aria-hidden="true"></i> Contato do suporte disponível em caso de dúvidas</li>
+        </ul>
+    </section>
+    <section class="auth-content" aria-label="Formulário de nova senha">
+        <div class="auth-card">
+            <div class="auth-card__header">
+                <i class="bi bi-key" aria-hidden="true"></i>
+                <div>
+                    <h2 class="auth-card__title">Definir nova senha</h2>
+                    <p class="auth-card__subtitle">Redefinindo acesso para <strong><?= htmlspecialchars($email) ?></strong></p>
+                </div>
             </div>
-            <div class="alert-stack mb-3">
+            <div class="alert-stack" role="status">
                 <?php if (!empty($status)): ?>
                     <div class="alert alert-info shadow-sm" role="alert"><?= htmlspecialchars($status) ?></div>
                 <?php endif; ?>
@@ -26,20 +40,20 @@ include base_path('app/Views/partials/layout-start.php');
                 <input type="hidden" name="token" value="<?= htmlspecialchars($token) ?>">
                 <div>
                     <label for="password" class="form-label">Nova senha</label>
-                    <input type="password" class="form-control form-control-lg" id="password" name="password" minlength="8" required autofocus>
+                    <input type="password" class="form-control form-control-lg" id="password" name="password" minlength="8" required autocomplete="new-password" autofocus>
                 </div>
                 <div>
                     <label for="password_confirmation" class="form-label">Confirmar nova senha</label>
-                    <input type="password" class="form-control form-control-lg" id="password_confirmation" name="password_confirmation" minlength="8" required>
+                    <input type="password" class="form-control form-control-lg" id="password_confirmation" name="password_confirmation" minlength="8" required autocomplete="new-password">
                 </div>
                 <button type="submit" class="btn btn-info btn-lg w-100 text-dark">
                     <i class="bi bi-unlock"></i> Salvar nova senha
                 </button>
             </form>
-            <div class="text-center mt-3">
-                <a href="/login" class="small">Voltar ao login</a>
+            <div class="auth-links">
+                <a href="/login" class="link-secondary">Voltar ao login</a>
             </div>
         </div>
-    </div>
+    </section>
 </div>
-<?php include base_path('app/Views/partials/layout-end.php'); ?>
+<?php include base_path('app/Views/partials/layout-auth-end.php'); ?>

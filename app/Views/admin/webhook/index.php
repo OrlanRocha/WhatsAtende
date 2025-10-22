@@ -2,12 +2,16 @@
 /** @var array<string, string|null> $settings */
 /** @var string|null $status */
 /** @var string|null $error */
+$breadcrumbs = [
+    ['label' => 'Admin', 'href' => '/admin'],
+    ['label' => 'Integrações'],
+];
 $pageTitle = 'Integrações · WhatsAtende';
 include base_path('app/Views/partials/layout-start.php');
-include base_path('app/Views/admin/partials/nav.php');
+include base_path('app/Views/partials/topbar.php');
 $mode = $settings['integration_mode'] ?? 'webhook';
 ?>
-<div class="container-xxl py-4">
+<div class="workspace">
     <div class="row g-4">
         <div class="col-lg-7">
             <div class="card shadow-sm border-0 h-100">
