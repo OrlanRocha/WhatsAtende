@@ -222,6 +222,7 @@ class TicketService
         $mediaType = $this->normalizeMediaType($attachment['type'] ?? 'text');
         $mediaUrl = $attachment['url'] ?? null;
         $metadata = null;
+        $contactExternalId = null;
 
         if ($attachment !== null) {
             $metadata = [
@@ -295,6 +296,9 @@ class TicketService
             'user_id' => $userId,
             'media_type' => $mediaType,
             'message' => 'Mensagem do atendente registrada.',
+            'remote_jid' => $contactExternalId,
+            'body_length' => strlen($body),
+            'has_attachment' => $attachment !== null,
         ]);
     }
 
@@ -364,7 +368,8 @@ class TicketService
                 $this->persistNativeMessages(
                     (int) ($ticket['id'] ?? 0),
                     isset($ticket['contact_id']) ? (int) $ticket['contact_id'] : null,
-                    $normalizedNative
+                    $normalizedNative,
+                    $remoteJid
                 );
             } catch (Throwable $exception) {
                 $this->logger->error('ticket.native_history_persist_failed', [
@@ -378,15 +383,21 @@ class TicketService
             return $normalizedDb;
         }
 
+        $nativeCount = count($normalizedNative);
+        $databaseCount = count($normalizedDb);
+
         $existing = [];
         foreach ($normalizedNative as $message) {
             $existing[$this->messageSignature($message)] = true;
         }
 
+        $duplicates = 0;
         foreach ($normalizedDb as $message) {
             $signature = $this->messageSignature($message);
             if (!isset($existing[$signature])) {
                 $normalizedNative[] = $message;
+            } else {
+                $duplicates++;
             }
         }
 
@@ -401,6 +412,22 @@ class TicketService
             return strcmp((string) $aTime, (string) $bTime);
         });
 
+        $mergedTotal = count($normalizedNative);
+        $addedFromDatabase = $mergedTotal - $nativeCount;
+        if ($addedFromDatabase < 0) {
+            $addedFromDatabase = 0;
+        }
+
+        $this->logger->info('ticket.native_history_synced', [
+            'ticket_id' => $ticket['id'] ?? null,
+            'remote_jid' => $remoteJid,
+            'native_messages' => $nativeCount,
+            'database_messages' => $databaseCount,
+            'merged_total' => $mergedTotal,
+            'deduplicated' => $duplicates,
+            'added_from_database' => $addedFromDatabase,
+        ]);
+
         return $normalizedNative;
     }
 
@@ -411,6 +438,18 @@ class TicketService
     private function normalizeDatabaseMessages(array $messages): array
     {
         $normalized = array_map(function (array $message): array {
+            $remoteId = null;
+            $metadata = $message['metadata'] ?? null;
+            if (is_string($metadata) && $metadata !== '') {
+                $decoded = json_decode($metadata, true);
+                if (is_array($decoded)) {
+                    $remoteId = isset($decoded['remote_id']) ? (string) $decoded['remote_id'] : null;
+                    if (!isset($message['status']) && isset($decoded['status'])) {
+                        $message['status'] = $decoded['status'];
+                    }
+                }
+            }
+
             return [
                 'id' => $message['id'] ?? null,
                 'ticket_id' => $message['ticket_id'] ?? null,
@@ -424,6 +463,7 @@ class TicketService
                 'sent_at' => isset($message['sent_at']) ? (string) $message['sent_at'] : null,
                 'agent_name' => $message['agent_name'] ?? null,
                 'status' => $message['status'] ?? null,
+                'remote_id' => $remoteId,
             ];
         }, $messages);
 
@@ -483,6 +523,7 @@ class TicketService
                 'status' => $message['status'] ?? null,
                 'raw' => $message['raw'] ?? null,
                 'from_me' => $fromMe,
+                'remote_id' => $id,
             ];
         }
 
@@ -542,7 +583,7 @@ class TicketService
     /**
      * @param array<int, array<string, mixed>> $messages
      */
-    private function persistNativeMessages(int $ticketId, ?int $contactId, array $messages): void
+    private function persistNativeMessages(int $ticketId, ?int $contactId, array $messages, string $remoteJid): void
     {
         if ($ticketId <= 0 || $messages === []) {
             return;
@@ -560,6 +601,8 @@ class TicketService
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
         $updatedContact = false;
         $latestSentAt = null;
+        $stored = 0;
+        $skipped = 0;
 
         foreach ($messages as $message) {
             if (!empty($message['from_me'])) {
@@ -582,6 +625,7 @@ class TicketService
             ]);
 
             if ($select->fetchColumn()) {
+                $skipped++;
                 continue;
             }
 
@@ -605,12 +649,28 @@ class TicketService
             if ($latestSentAt === null || strcmp($sentAt, $latestSentAt) > 0) {
                 $latestSentAt = $sentAt;
             }
+            $stored++;
         }
 
         if ($updatedContact && $contactId !== null) {
             $this->connection->prepare('UPDATE contacts SET last_interaction_at = :now WHERE id = :id')->execute([
                 'now' => $latestSentAt ?? $now,
                 'id' => $contactId,
+            ]);
+        }
+
+        if ($stored > 0) {
+            $this->logger->info('ticket.native_messages_persisted', [
+                'ticket_id' => $ticketId,
+                'remote_jid' => $remoteJid,
+                'stored_messages' => $stored,
+                'skipped_existing' => $skipped,
+            ]);
+        } elseif ($skipped > 0) {
+            $this->logger->info('ticket.native_messages_skipped', [
+                'ticket_id' => $ticketId,
+                'remote_jid' => $remoteJid,
+                'skipped_existing' => $skipped,
             ]);
         }
     }
@@ -620,8 +680,17 @@ class TicketService
      */
     private function messageSignature(array $message): string
     {
+        $remoteId = isset($message['remote_id']) ? (string) $message['remote_id'] : '';
+        if ($remoteId !== '') {
+            return 'remote:' . $remoteId;
+        }
+
+        $id = isset($message['id']) ? (string) $message['id'] : '';
+        if ($id !== '') {
+            return 'id:' . $id;
+        }
+
         $parts = [
-            (string) ($message['id'] ?? ''),
             (string) ($message['sent_at'] ?? ''),
             (string) ($message['sender_type'] ?? ''),
             (string) ($message['body'] ?? ''),

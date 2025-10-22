@@ -34,12 +34,26 @@ class LoggerService
              VALUES (:user_id, :level, :action, :message, :context, :ip_address)'
         );
 
+        $options = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES;
+        if (defined('JSON_INVALID_UTF8_SUBSTITUTE')) {
+            $options |= JSON_INVALID_UTF8_SUBSTITUTE;
+        }
+
+        $encodedContext = json_encode($context, $options);
+
+        if ($encodedContext === false) {
+            $encodedContext = json_encode([
+                'encoding_error' => true,
+                'original' => array_keys($context),
+            ], $options);
+        }
+
         $stmt->execute([
             'user_id' => $context['user_id'] ?? null,
             'level' => $level,
             'action' => $action,
             'message' => $context['message'] ?? '',
-            'context' => json_encode($context),
+            'context' => $encodedContext,
             'ip_address' => $context['ip_address'] ?? null,
         ]);
     }
