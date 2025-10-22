@@ -11,10 +11,19 @@ $host = $_SERVER['HTTP_HOST'] ?? '';
 $secure = (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off')
     || (isset($_SERVER['SERVER_PORT']) && (int) $_SERVER['SERVER_PORT'] === 443);
 
+$cookieDomain = '';
+if ($host !== '') {
+    $hostWithoutPort = explode(':', $host)[0] ?? '';
+
+    if ($hostWithoutPort !== '' && strpos($hostWithoutPort, '.') !== false) {
+        $cookieDomain = $hostWithoutPort;
+    }
+}
+
 session_set_cookie_params([
     'lifetime' => 0,
     'path' => '/',
-    'domain' => $host !== '' ? $host : '',
+    'domain' => $cookieDomain,
     'secure' => $secure,
     'httponly' => true,
     'samesite' => 'Strict',
