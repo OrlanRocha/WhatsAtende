@@ -40,7 +40,7 @@ class DashboardService
         $summary['resolved_today'] = (int) $stmtResolved->fetchColumn();
 
         $stmtAverage = $this->connection->query(
-            'SELECT AVG(resolution_time_seconds) FROM ticket_metrics WHERE resolution_time_seconds IS NOT NULL'
+            'SELECT AVG(resolution_time_sec) FROM ticket_metrics WHERE resolution_time_sec IS NOT NULL'
         );
         $avg = $stmtAverage->fetchColumn();
         $summary['average_resolution_minutes'] = $avg ? round(((int) $avg) / 60, 1) : null;

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Support\FileLogger;
+use DateTimeImmutable;
 use RuntimeException;
 use function app_logger;
 
@@ -29,7 +30,7 @@ class EvolutionService
     }
 
     /**
-     * @return array{status:int, success:bool, data:mixed, error:?string}
+     * @return array{status:int, success:bool, data:mixed, error:?string, error_detail:?string, content_type:?string, body:mixed}
      */
     public function getChats(): array
     {
@@ -38,7 +39,68 @@ class EvolutionService
             return $this->notConfiguredResponse();
         }
 
-        return $this->makeRequest($config, 'POST', '/chat/findChats/' . $config['instance'], []);
+        $response = $this->makeRequest(
+            $config,
+            'POST',
+            '/chat/findChats/' . $config['instance'],
+            [],
+            [200, 204, 404]
+        );
+
+        if (($response['success'] ?? false) && in_array($response['status'], [204, 404], true)) {
+            $response['status'] = 200;
+        }
+
+        if (($response['success'] ?? false) && !is_array($response['data'])) {
+            $response['data'] = [];
+        }
+
+        return $response;
+    }
+
+    /**
+     * @return array{status:int, success:bool, chats:array<int, array<string, mixed>>, error:?string}
+     */
+    public function fetchChatsOverview(): array
+    {
+        $response = $this->getChats();
+        if (!($response['success'] ?? false)) {
+            return [
+                'status' => (int) ($response['status'] ?? 500),
+                'success' => false,
+                'chats' => [],
+                'error' => $response['error_detail'] ?? $response['error'] ?? 'Falha ao consultar Evolution API.',
+            ];
+        }
+
+        $rawChats = $this->extractChats($response['data'] ?? null);
+        $chats = array_map([$this, 'normalizeChat'], $rawChats);
+
+        usort($chats, static function (array $a, array $b): int {
+            $aTime = $a['last_message_at'] ?? null;
+            $bTime = $b['last_message_at'] ?? null;
+
+            if ($aTime === $bTime) {
+                return 0;
+            }
+
+            if ($bTime === null) {
+                return -1;
+            }
+
+            if ($aTime === null) {
+                return 1;
+            }
+
+            return strcmp($bTime, $aTime);
+        });
+
+        return [
+            'status' => 200,
+            'success' => true,
+            'chats' => $chats,
+            'error' => null,
+        ];
     }
 
     /**
@@ -58,6 +120,90 @@ class EvolutionService
         ];
 
         return $this->makeRequest($config, 'POST', '/chat/findMessages/' . $config['instance'], $payload);
+    }
+
+    /**
+     * @return array{status:int, success:bool, messages:array<int, array<string, mixed>>, error:?string}
+     */
+    public function fetchConversationMessages(string $remoteJid, int $limit = 100): array
+    {
+        $remoteJid = trim($remoteJid);
+        if ($remoteJid === '') {
+            return [
+                'status' => 400,
+                'success' => false,
+                'messages' => [],
+                'error' => 'remoteJid inválido fornecido para consulta de mensagens.',
+            ];
+        }
+
+        $response = $this->getMessages($remoteJid, 1, max(1, $limit));
+        if (!($response['success'] ?? false)) {
+            return [
+                'status' => (int) ($response['status'] ?? 500),
+                'success' => false,
+                'messages' => [],
+                'error' => $response['error_detail'] ?? $response['error'] ?? 'Falha ao buscar mensagens no Evolution.',
+            ];
+        }
+
+        $payload = $response['data'] ?? [];
+        $rawMessages = [];
+        if (is_array($payload)) {
+            $rawMessages = $this->collectMessages($payload);
+        }
+
+        if ($rawMessages === []) {
+            return [
+                'status' => 200,
+                'success' => true,
+                'messages' => [],
+                'error' => null,
+            ];
+        }
+
+        $normalized = [];
+        foreach ($rawMessages as $message) {
+            if (!is_array($message)) {
+                continue;
+            }
+
+            $normalizedMessage = $this->normalizeConversationMessage($message, $remoteJid);
+            if ($normalizedMessage === null) {
+                continue;
+            }
+
+            $messageId = $normalizedMessage['id'];
+            $normalized[$messageId] = $normalizedMessage;
+        }
+
+        if ($normalized === []) {
+            return [
+                'status' => 200,
+                'success' => true,
+                'messages' => [],
+                'error' => null,
+            ];
+        }
+
+        $messages = array_values($normalized);
+        usort($messages, static function (array $a, array $b): int {
+            $aTime = $a['sent_at'] ?? '';
+            $bTime = $b['sent_at'] ?? '';
+
+            if ($aTime === $bTime) {
+                return strcmp($a['id'] ?? '', $b['id'] ?? '');
+            }
+
+            return strcmp($aTime, $bTime);
+        });
+
+        return [
+            'status' => 200,
+            'success' => true,
+            'messages' => $messages,
+            'error' => null,
+        ];
     }
 
     /**
@@ -195,6 +341,91 @@ class EvolutionService
     /**
      * @return array{success:bool,status:int,error:?string}
      */
+    public function sendMedia(string $contactExternalId, string $filePath, array $options = []): array
+    {
+        $config = $this->getNativeConfig();
+        if ($config === null) {
+            return [
+                'success' => false,
+                'status' => 409,
+                'error' => 'Integração nativa não está configurada.',
+            ];
+        }
+
+        if (!is_file($filePath) || !is_readable($filePath)) {
+            return [
+                'success' => false,
+                'status' => 400,
+                'error' => 'Arquivo de mídia indisponível para envio.',
+            ];
+        }
+
+        $contents = file_get_contents($filePath);
+        if ($contents === false) {
+            return [
+                'success' => false,
+                'status' => 500,
+                'error' => 'Falha ao ler o arquivo de mídia.',
+            ];
+        }
+
+        $caption = isset($options['caption']) ? $this->sanitizeMessageBody((string) $options['caption']) : '';
+        $fileName = isset($options['filename']) && is_string($options['filename']) && $options['filename'] !== ''
+            ? $options['filename']
+            : basename($filePath);
+        $mime = isset($options['mime_type']) && is_string($options['mime_type']) && $options['mime_type'] !== ''
+            ? $options['mime_type']
+            : ($this->detectMime($filePath) ?? 'application/octet-stream');
+        $mediaType = isset($options['type']) && is_string($options['type']) && $options['type'] !== ''
+            ? strtolower($options['type'])
+            : 'auto';
+
+        $payload = [
+            'number' => $this->sanitizeContactNumber($contactExternalId),
+            'mediaData' => base64_encode($contents),
+            'mimetype' => $mime,
+            'fileName' => $fileName,
+            'caption' => $caption,
+            'type' => $mediaType,
+        ];
+
+        if ($payload['caption'] === '') {
+            unset($payload['caption']);
+        }
+
+        $response = $this->makeRequest($config, 'POST', '/message/sendMedia/' . $config['instance'], $payload);
+        if (!($response['success'] ?? false)) {
+            $errorMessage = $this->buildSendErrorMessage($response);
+
+            $this->logger->error('evolution.media_send_failed', [
+                'contact' => $contactExternalId,
+                'status' => $response['status'] ?? 500,
+                'error' => $errorMessage,
+            ]);
+
+            return [
+                'success' => false,
+                'status' => (int) ($response['status'] ?? 500),
+                'error' => $errorMessage,
+            ];
+        }
+
+        $this->logger->info('evolution.media_sent', [
+            'contact' => $contactExternalId,
+            'filename' => $fileName,
+            'mime_type' => $mime,
+        ]);
+
+        return [
+            'success' => true,
+            'status' => (int) ($response['status'] ?? 200),
+            'error' => null,
+        ];
+    }
+
+    /**
+     * @return array{success:bool,status:int,error:?string}
+     */
     public function sendText(string $contactExternalId, string $message, array $options = []): array
     {
         $payload = array_merge($options, [
@@ -270,9 +501,489 @@ class EvolutionService
     }
 
     /**
+     * @param mixed $data
+     * @return array<int, array<string, mixed>>
+     */
+    private function extractChats(mixed $data): array
+    {
+        if ($data === null) {
+            return [];
+        }
+
+        if (is_array($data)) {
+            if (array_is_list($data)) {
+                return $data;
+            }
+
+            $candidates = [$data];
+            foreach (['chats', 'data', 'items', 'rows', 'response'] as $key) {
+                if (isset($data[$key])) {
+                    $value = $data[$key];
+                    if (is_array($value)) {
+                        $candidates[] = $value;
+                    }
+                }
+            }
+
+            foreach ($candidates as $candidate) {
+                if (!is_array($candidate)) {
+                    continue;
+                }
+                if (array_is_list($candidate)) {
+                    return $candidate;
+                }
+                $values = array_values($candidate);
+                if ($values !== [] && is_array($values[0])) {
+                    return $values;
+                }
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * @param array<string, mixed> $chat
+     * @return array<string, mixed>
+     */
+    private function normalizeChat(array $chat): array
+    {
+        $id = (string) ($chat['remoteJid'] ?? $chat['id'] ?? $chat['wid'] ?? '');
+        $name = (string) ($chat['name'] ?? $chat['pushName'] ?? $chat['contact'] ?? '');
+        if ($name === '' && isset($chat['lastMessage']) && is_array($chat['lastMessage'])) {
+            $name = (string) ($chat['lastMessage']['pushName'] ?? $chat['lastMessage']['contact'] ?? $chat['lastMessage']['participant'] ?? '');
+        }
+
+        $unread = (int) ($chat['unreadCount'] ?? $chat['unread'] ?? 0);
+
+        $messages = $this->extractMessages($chat);
+        $calculatedUnread = 0;
+        foreach ($messages as $message) {
+            if (!is_array($message)) {
+                continue;
+            }
+
+            $type = strtolower((string) ($message['messageType'] ?? $message['type'] ?? ''));
+            if ($type !== '' && $type !== 'conversation') {
+                continue;
+            }
+
+            $fromMe = (bool) ($message['key']['fromMe'] ?? $message['fromMe'] ?? false);
+            if ($fromMe) {
+                continue;
+            }
+
+            $status = strtoupper((string) ($message['status'] ?? ''));
+            if ($status === 'READ') {
+                continue;
+            }
+
+            $calculatedUnread++;
+        }
+
+        if ($calculatedUnread > 0) {
+            $unread = $calculatedUnread;
+        } elseif ($unread === 0 && isset($chat['lastMessage']) && is_array($chat['lastMessage'])) {
+            $lastMessage = $chat['lastMessage'];
+            $status = strtoupper((string) ($lastMessage['status'] ?? ''));
+            $fromMe = (bool) ($lastMessage['key']['fromMe'] ?? $lastMessage['fromMe'] ?? false);
+
+            if ($status !== 'READ' && !$fromMe) {
+                $unread = 1;
+            }
+        }
+
+        $lastMessageSource = $chat['conversationTimestamp']
+            ?? $chat['lastMessageAt']
+            ?? $chat['last_message_at']
+            ?? $chat['last_message']
+            ?? null;
+
+        if ($lastMessageSource === null && isset($chat['lastMessage']) && is_array($chat['lastMessage'])) {
+            $lastMessageSource = $chat['lastMessage']['messageTimestamp']
+                ?? $chat['lastMessage']['timestamp']
+                ?? $chat['lastMessage']['createdAt']
+                ?? $chat['lastMessage']['created_at']
+                ?? null;
+        }
+
+        if ($lastMessageSource === null) {
+            $lastMessageSource = $chat['updatedAt'] ?? $chat['updated_at'] ?? $chat['last_activity_at'] ?? null;
+        }
+
+        $lastMessage = $this->extractTimestamp($lastMessageSource);
+
+        $createdSource = $chat['createdAt']
+            ?? $chat['created_at']
+            ?? $chat['firstSeen']
+            ?? $chat['startAt']
+            ?? $chat['started_at']
+            ?? $chat['windowStart']
+            ?? $chat['window_start']
+            ?? null;
+
+        if ($createdSource === null) {
+            $createdSource = $chat['updatedAt'] ?? $chat['updated_at'] ?? null;
+        }
+
+        $createdAt = $this->extractTimestamp($createdSource);
+
+        if ($createdAt === null) {
+            $createdAt = $lastMessage;
+        }
+
+        static $today = null;
+        if ($today === null) {
+            $today = (new DateTimeImmutable('today'))->format('Y-m-d');
+        }
+        $openedToday = false;
+        foreach ([$createdAt, $lastMessage, $this->extractTimestamp($chat['updatedAt'] ?? $chat['updated_at'] ?? null)] as $candidate) {
+            if ($candidate !== null && str_starts_with($candidate, $today)) {
+                $openedToday = true;
+                break;
+            }
+        }
+
+        $profileUrl = $id !== '' ? $this->buildProfileUrl($id) : null;
+
+        return [
+            'id' => $id,
+            'name' => $name,
+            'unread' => $unread,
+            'last_message_at' => $lastMessage,
+            'created_at' => $createdAt,
+            'opened_today' => $openedToday,
+            'profile_url' => $profileUrl,
+            'raw' => $chat,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $chat
+     * @return array<int, mixed>
+     */
+    private function extractMessages(array $chat): array
+    {
+        $messages = [];
+        $seen = [];
+
+        $addMessage = static function (array $message) use (&$messages, &$seen): void {
+            $identifier = null;
+            if (isset($message['id']) && is_scalar($message['id'])) {
+                $identifier = (string) $message['id'];
+            } elseif (isset($message['key']['id']) && is_scalar($message['key']['id'])) {
+                $identifier = (string) $message['key']['id'];
+            }
+
+            if ($identifier !== null) {
+                if (isset($seen[$identifier])) {
+                    return;
+                }
+                $seen[$identifier] = true;
+            }
+
+            $messages[] = $message;
+        };
+
+        foreach (['messages', 'lastMessages', 'history', 'items'] as $key) {
+            if (!isset($chat[$key])) {
+                continue;
+            }
+
+            foreach ($this->collectMessages($chat[$key]) as $message) {
+                if (is_array($message)) {
+                    $addMessage($message);
+                }
+            }
+        }
+
+        if (isset($chat['lastMessage']) && is_array($chat['lastMessage'])) {
+            $addMessage($chat['lastMessage']);
+        }
+
+        return $messages;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function collectMessages(mixed $value): array
+    {
+        if (!is_array($value)) {
+            return [];
+        }
+
+        if ($this->looksLikeMessage($value)) {
+            return [$value];
+        }
+
+        $messages = [];
+        if (array_is_list($value)) {
+            foreach ($value as $item) {
+                foreach ($this->collectMessages($item) as $message) {
+                    $messages[] = $message;
+                }
+            }
+
+            return $messages;
+        }
+
+        foreach ($value as $item) {
+            foreach ($this->collectMessages($item) as $message) {
+                $messages[] = $message;
+            }
+        }
+
+        return $messages;
+    }
+
+    private function looksLikeMessage(array $value): bool
+    {
+        return isset($value['key'])
+            || isset($value['messageType'])
+            || isset($value['type'])
+            || isset($value['status'])
+            || isset($value['message']);
+    }
+
+    /**
+     * @param array<string, mixed> $message
+     */
+    private function normalizeConversationMessage(array $message, string $fallbackRemoteJid): ?array
+    {
+        $id = '';
+        if (isset($message['id']) && is_scalar($message['id'])) {
+            $id = (string) $message['id'];
+        } elseif (isset($message['key']['id']) && is_scalar($message['key']['id'])) {
+            $id = (string) $message['key']['id'];
+        }
+
+        if ($id === '') {
+            return null;
+        }
+
+        $key = isset($message['key']) && is_array($message['key']) ? $message['key'] : [];
+        $remoteJid = (string) ($key['remoteJid'] ?? $message['remoteJid'] ?? $fallbackRemoteJid);
+        if ($remoteJid === '') {
+            $remoteJid = $fallbackRemoteJid;
+        }
+
+        $fromMe = (bool) ($key['fromMe'] ?? $message['fromMe'] ?? false);
+
+        $timestamp = $this->extractTimestamp(
+            $message['messageTimestamp']
+                ?? $message['timestamp']
+                ?? $message['createdAt']
+                ?? $message['created_at']
+                ?? $message['sentAt']
+                ?? $message['ts']
+                ?? null
+        );
+
+        if ($timestamp === null) {
+            return null;
+        }
+
+        $type = strtolower((string) ($message['messageType'] ?? $message['type'] ?? ''));
+        if ($type === 'protocolmessage' || $type === 'notification' || $type === 'senderkeydistributionmessage') {
+            return null;
+        }
+
+        $content = $this->extractMessageContent($message, $id);
+
+        if ($content['body'] === '' && $content['media_url'] === null) {
+            return null;
+        }
+
+        return [
+            'id' => $id,
+            'remote_jid' => $remoteJid,
+            'from_me' => $fromMe,
+            'status' => strtoupper((string) ($message['status'] ?? '')),
+            'sent_at' => $timestamp,
+            'body' => $content['body'],
+            'media_type' => $content['media_type'],
+            'media_url' => $content['media_url'],
+            'raw' => $message,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $message
+     * @return array{body:string, media_type:string, media_url:?string}
+     */
+    private function extractMessageContent(array $message, string $messageId): array
+    {
+        $body = '';
+        $mediaType = 'text';
+        $mediaUrl = null;
+
+        if (isset($message['body']) && is_string($message['body'])) {
+            $body = $message['body'];
+        }
+
+        if (isset($message['text']) && is_string($message['text'])) {
+            $body = $message['text'];
+        }
+
+        if (isset($message['message']) && is_array($message['message'])) {
+            $payload = $message['message'];
+            $resolved = $this->resolveMessageBody($payload);
+            if ($resolved !== null) {
+                $body = $resolved;
+            }
+
+            if (isset($payload['imageMessage']) && is_array($payload['imageMessage'])) {
+                $mediaType = 'image';
+                $mediaUrl = $this->buildMediaUrl($messageId);
+                $caption = $payload['imageMessage']['caption'] ?? null;
+                if (is_string($caption) && trim($caption) !== '') {
+                    $body = $caption;
+                }
+            } elseif (isset($payload['audioMessage']) && is_array($payload['audioMessage'])) {
+                $mediaType = 'audio';
+                $mediaUrl = $this->buildMediaUrl($messageId);
+                $caption = $payload['audioMessage']['caption'] ?? null;
+                if (is_string($caption) && trim($caption) !== '') {
+                    $body = $caption;
+                }
+            } elseif (isset($payload['videoMessage']) && is_array($payload['videoMessage'])) {
+                $mediaType = 'video';
+                $mediaUrl = $this->buildMediaUrl($messageId);
+                $caption = $payload['videoMessage']['caption'] ?? null;
+                if (is_string($caption) && trim($caption) !== '') {
+                    $body = $caption;
+                }
+            } elseif (isset($payload['documentMessage']) && is_array($payload['documentMessage'])) {
+                $mediaType = 'file';
+                $mediaUrl = $this->buildMediaUrl($messageId);
+                $fileName = $payload['documentMessage']['fileName'] ?? null;
+                if (is_string($fileName) && trim($fileName) !== '') {
+                    $body = $fileName;
+                }
+            } elseif (isset($payload['stickerMessage']) && is_array($payload['stickerMessage'])) {
+                $mediaType = 'image';
+                $mediaUrl = $this->buildMediaUrl($messageId);
+            }
+        }
+
+        $body = trim((string) $body);
+
+        $mediaType = $this->normalizeMediaType($mediaType);
+
+        return [
+            'body' => $body,
+            'media_type' => $mediaType,
+            'media_url' => $mediaUrl,
+        ];
+    }
+
+    private function normalizeMediaType(string $type): string
+    {
+        $normalized = strtolower($type);
+
+        return match ($normalized) {
+            'image', 'photo', 'sticker' => 'image',
+            'audio', 'ptt', 'voice' => 'audio',
+            'video' => 'video',
+            'file', 'document', 'application', 'doc', 'pdf' => 'file',
+            default => 'text',
+        };
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function resolveMessageBody(array $payload): ?string
+    {
+        $paths = [
+            ['conversation'],
+            ['extendedTextMessage', 'text'],
+            ['ephemeralMessage', 'message', 'conversation'],
+            ['templateMessage', 'hydratedTemplate', 'hydratedContentText'],
+            ['buttonsMessage', 'contentText'],
+            ['buttonsMessage', 'body'],
+            ['listMessage', 'description'],
+            ['listMessage', 'body'],
+            ['interactiveMessage', 'body', 'text'],
+        ];
+
+        foreach ($paths as $path) {
+            $value = $this->arrayGet($payload, $path);
+            if (is_string($value) && trim($value) !== '') {
+                return trim($value);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $array
+     * @param array<int, string> $path
+     */
+    private function arrayGet(array $array, array $path): mixed
+    {
+        $value = $array;
+        foreach ($path as $segment) {
+            if (!is_array($value) || !array_key_exists($segment, $value)) {
+                return null;
+            }
+            $value = $value[$segment];
+        }
+
+        return $value;
+    }
+
+    private function buildMediaUrl(string $messageId): string
+    {
+        return '/api/evolution/media?messageId=' . rawurlencode($messageId);
+    }
+
+    private function buildProfileUrl(string $remoteJid): string
+    {
+        return '/api/evolution/profile?remoteJid=' . rawurlencode($remoteJid);
+    }
+
+    private function extractTimestamp(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (is_numeric($value)) {
+            $timestamp = (int) $value;
+            if ($timestamp > 9999999999) {
+                $timestamp = (int) round($timestamp / 1000);
+            }
+            if ($timestamp <= 0) {
+                return null;
+            }
+
+            return date('Y-m-d H:i:s', $timestamp);
+        }
+
+        if (is_string($value) && $value !== '') {
+            $time = strtotime($value);
+            if ($time !== false) {
+                return date('Y-m-d H:i:s', $time);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<int, int> $expectedStatuses
      * @return array{status:int, success:bool, data:mixed, error:?string, error_detail:?string, content_type:?string, body:mixed}
      */
-    private function makeRequest(array $config, string $method, string $endpoint, ?array $payload = null): array
+    private function makeRequest(
+        array $config,
+        string $method,
+        string $endpoint,
+        ?array $payload = null,
+        array $expectedStatuses = []
+    ): array
     {
         $url = $config['base_url'] . $endpoint;
         $method = strtoupper($method);
@@ -383,7 +1094,11 @@ class EvolutionService
             }
         }
 
+        $normalizedExpected = array_map('intval', $expectedStatuses);
         $success = $status >= 200 && $status < 300;
+        if (!$success && $normalizedExpected !== []) {
+            $success = in_array($status, $normalizedExpected, true);
+        }
         $errorDetail = null;
         if (!$success) {
             if ($curlError !== '') {
@@ -446,6 +1161,9 @@ class EvolutionService
             'success' => false,
             'data' => null,
             'error' => 'Integração nativa não configurada.',
+            'error_detail' => null,
+            'content_type' => null,
+            'body' => null,
         ];
     }
 

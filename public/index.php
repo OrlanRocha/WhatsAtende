@@ -3,14 +3,17 @@
 declare(strict_types=1);
 
 use App\Controllers\Admin\DashboardController as AdminDashboardController;
+use App\Controllers\Admin\EvolutionController as AdminEvolutionController;
 use App\Controllers\Admin\LogController as AdminLogController;
 use App\Controllers\Admin\TemplateController as AdminTemplateController;
 use App\Controllers\Admin\TicketController as AdminTicketController;
 use App\Controllers\Admin\UserController as AdminUserController;
 use App\Controllers\Admin\WebhookController as AdminWebhookController;
 use App\Controllers\Api\EvolutionController as ApiEvolutionController;
+use App\Controllers\Api\LogStreamController;
 use App\Controllers\AuthController;
 use App\Controllers\TicketController;
+use App\Controllers\HealthController;
 use App\Controllers\WebhookController;
 use App\Services\AuthService;
 use App\Services\DashboardService;
@@ -20,8 +23,10 @@ use App\Services\LoginThrottleService;
 use App\Services\SettingService;
 use App\Services\TemplateService;
 use App\Services\TicketService;
+use App\Services\HealthService;
 use App\Services\UserService;
 use App\Services\WebhookService;
+use App\Support\DatabaseBootstrapper;
 
 require __DIR__ . '/../app/bootstrap.php';
 
@@ -80,6 +85,8 @@ container_bind(\PDO::class, static function () use ($databaseConfig): \PDO {
     $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(\PDO::ATTR_DEFAULT_FETCH_MODE, \PDO::FETCH_ASSOC);
 
+    DatabaseBootstrapper::ensure($pdo);
+
     return $pdo;
 });
 
@@ -95,6 +102,7 @@ container_bind(UserService::class, static fn () => new UserService(resolve(\PDO:
 container_bind(TemplateService::class, static fn () => new TemplateService(resolve(\PDO::class), resolve(LoggerService::class)));
 container_bind(SettingService::class, static fn () => new SettingService(resolve(\PDO::class), resolve(LoggerService::class)));
 container_bind(EvolutionService::class, static fn () => new EvolutionService(resolve(SettingService::class), resolve(LoggerService::class)));
+container_bind(HealthService::class, static fn () => new HealthService(resolve(EvolutionService::class), resolve(\PDO::class)));
 container_bind(TicketService::class, static fn () => new TicketService(
     resolve(\PDO::class),
     resolve(LoggerService::class),
@@ -111,7 +119,27 @@ container_bind(AdminUserController::class, static fn () => new AdminUserControll
 container_bind(AdminTemplateController::class, static fn () => new AdminTemplateController(resolve(TemplateService::class)));
 container_bind(AdminLogController::class, static fn () => new AdminLogController(resolve(LoggerService::class)));
 container_bind(AdminWebhookController::class, static fn () => new AdminWebhookController(resolve(SettingService::class), resolve(EvolutionService::class)));
+container_bind(AdminEvolutionController::class, static fn () => new AdminEvolutionController(resolve(EvolutionService::class)));
 container_bind(ApiEvolutionController::class, static fn () => new ApiEvolutionController(resolve(EvolutionService::class)));
+container_bind(LogStreamController::class, static fn () => new LogStreamController(resolve(LoggerService::class)));
+container_bind(HealthController::class, static fn () => new HealthController(resolve(HealthService::class)));
+
+if (!empty($GLOBALS['whats_missing_env']) && is_array($GLOBALS['whats_missing_env'])) {
+    $missingEnv = array_values(array_unique(array_map('strval', $GLOBALS['whats_missing_env'])));
+    if ($missingEnv !== []) {
+        try {
+            resolve(LoggerService::class)->error('environment.variables.missing', [
+                'message' => 'Variáveis obrigatórias ausentes no ambiente.',
+                'keys' => $missingEnv,
+            ]);
+        } catch (\Throwable $exception) {
+            app_logger()->error('environment.variables.persist_failed', [
+                'exception' => $exception->getMessage(),
+                'keys' => $missingEnv,
+            ]);
+        }
+    }
+}
 
 $routes = require base_path('routes/web.php');
 

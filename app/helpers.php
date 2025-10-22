@@ -80,6 +80,24 @@ function app_logger(): \App\Support\FileLogger
     return $logger;
 }
 
+function request_correlation_id(): string
+{
+    if (!isset($GLOBALS['whats_corr_id']) || !is_string($GLOBALS['whats_corr_id'])) {
+        try {
+            $GLOBALS['whats_corr_id'] = bin2hex(random_bytes(12));
+        } catch (\Throwable) {
+            $GLOBALS['whats_corr_id'] = uniqid('req_', true);
+        }
+    }
+
+    return $GLOBALS['whats_corr_id'];
+}
+
+function current_route_path(): string
+{
+    return parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+}
+
 function config(string $file): array
 {
     $path = base_path('config/' . trim($file, '/'));

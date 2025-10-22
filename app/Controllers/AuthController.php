@@ -163,24 +163,16 @@ class AuthController
         $email = filter_input(INPUT_POST, 'email', FILTER_SANITIZE_EMAIL) ?: '';
 
         if ($email !== '') {
-            $token = $this->authService->createPasswordReset($email);
-            if ($token) {
-                $message = 'Link de redefinição gerado. Utilize o token abaixo para continuar: ' . $token;
-                if (is_ajax()) {
-                    json_response(['message' => $message]);
-                }
-                set_flash('auth_status', $message);
-                redirect('/forgot-password');
-            }
+            $this->authService->createPasswordReset($email);
         }
 
-        $fallback = 'Se o e-mail existir em nossa base, você receberá instruções em instantes.';
+        $message = 'Se o e-mail existir em nossa base, você receberá instruções em instantes.';
 
         if (is_ajax()) {
-            json_response(['message' => $fallback]);
+            json_response(['message' => $message]);
         }
 
-        set_flash('auth_status', $fallback);
+        set_flash('auth_status', $message);
         redirect('/forgot-password');
     }
 
@@ -220,7 +212,7 @@ class AuthController
         }
 
         if ($errors !== []) {
-            $this->handleAuthError($errors, $_SERVER['HTTP_REFERER'] ?? '/forgot-password');
+            $this->handleAuthError($errors, $this->safeReferer('/forgot-password'));
         }
 
         $updated = $this->authService->resetPassword($token, $password);
@@ -238,6 +230,78 @@ class AuthController
 
         set_flash('auth_status', 'Senha redefinida com sucesso. Faça login novamente.');
         redirect('/login');
+    }
+
+    private function safeReferer(string $fallback): string
+    {
+        $referer = $_SERVER['HTTP_REFERER'] ?? '';
+        if ($referer === '') {
+            return $fallback;
+        }
+
+        $parts = parse_url($referer);
+        if ($parts === false) {
+            return $fallback;
+        }
+
+        if (isset($parts['scheme']) && !in_array(strtolower($parts['scheme']), ['http', 'https'], true)) {
+            return $fallback;
+        }
+
+        $allowedHosts = [];
+        $httpHost = $_SERVER['HTTP_HOST'] ?? '';
+        if ($httpHost !== '') {
+            $allowedHosts[] = strtolower($httpHost);
+            if (strpos($httpHost, ':') !== false) {
+                $hostWithoutPort = strstr($httpHost, ':', true);
+                if ($hostWithoutPort !== false && $hostWithoutPort !== '') {
+                    $allowedHosts[] = strtolower($hostWithoutPort);
+                }
+            }
+        }
+
+        $serverName = $_SERVER['SERVER_NAME'] ?? '';
+        if ($serverName !== '') {
+            $allowedHosts[] = strtolower($serverName);
+            $serverPort = $_SERVER['SERVER_PORT'] ?? '';
+            if ($serverPort !== '') {
+                $allowedHosts[] = strtolower($serverName . ':' . $serverPort);
+            }
+        }
+
+        $allowedHosts = array_values(array_unique(array_filter($allowedHosts)));
+
+        if (isset($parts['host'])) {
+            if ($allowedHosts === []) {
+                return $fallback;
+            }
+
+            $refererHost = strtolower($parts['host']);
+            $refererAuthority = $refererHost;
+            if (isset($parts['port'])) {
+                $refererAuthority .= ':' . $parts['port'];
+            }
+
+            $hostMatches = in_array($refererAuthority, $allowedHosts, true)
+                || (!isset($parts['port']) && in_array($refererHost, $allowedHosts, true));
+
+            if (!$hostMatches) {
+                return $fallback;
+            }
+        }
+
+        $path = $parts['path'] ?? '';
+        if ($path === '' || strpos($path, '/') !== 0 || strpos($path, '//') === 0) {
+            return $fallback;
+        }
+
+        $redirect = $path;
+
+        if (isset($parts['query']) && $parts['query'] !== '') {
+            $redirect .= '?' . $parts['query'];
+        }
+
+        return $redirect;
     }
 
     private function handleAuthError(array $errors, string $redirect): void
