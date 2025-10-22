@@ -122,10 +122,10 @@ class HealthService
         $since = (new DateTimeImmutable('-15 minutes'));
 
         $stmt = $this->connection->prepare(
-            'SELECT COUNT(*) FROM logs WHERE action LIKE :action AND created_at >= :since'
+            "SELECT COUNT(*) FROM logs WHERE service = :service AND level IN ('error','critical') AND created_at >= :since"
         );
         $stmt->execute([
-            'action' => 'queue.%',
+            'service' => 'queue',
             'since' => $since->format('Y-m-d H:i:s'),
         ]);
         $failures = (int) $stmt->fetchColumn();

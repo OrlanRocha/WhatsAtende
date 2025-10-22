@@ -32,9 +32,41 @@ class LoggerService
 
     private function write(string $level, string $action, array $context): void
     {
-        $stmt = $this->connection->prepare(
-            'INSERT INTO logs (user_id, level, action, message, context, ip_address)
-             VALUES (:user_id, :level, :action, :message, :context, :ip_address)'
+        $actorId = $context['actor_id'] ?? $context['user_id'] ?? null;
+        if ($actorId === null && function_exists('auth')) {
+            $actor = auth();
+            if ($actor !== null && isset($actor->id)) {
+                $actorId = (int) $actor->id;
+            }
+        }
+
+        $ip = $context['ip_address'] ?? $context['ip'] ?? ($_SERVER['REMOTE_ADDR'] ?? null);
+        $route = $context['route'] ?? (function_exists('current_route_path') ? current_route_path() : ($_SERVER['REQUEST_URI'] ?? '/'));
+        $message = (string) ($context['message'] ?? $action);
+        $service = $context['service'] ?? (str_contains($action, '.') ? explode('.', $action, 2)[0] : $action);
+        $corrId = $context['corr_id'] ?? null;
+        if ($corrId === null) {
+            if (function_exists('request_correlation_id')) {
+                $corrId = request_correlation_id();
+            } else {
+                try {
+                    $corrId = bin2hex(random_bytes(8));
+                } catch (\Throwable) {
+                    $corrId = uniqid('corr_', true);
+                }
+            }
+        }
+
+        $extraContext = $context;
+        unset(
+            $extraContext['actor_id'],
+            $extraContext['user_id'],
+            $extraContext['ip_address'],
+            $extraContext['ip'],
+            $extraContext['route'],
+            $extraContext['service'],
+            $extraContext['corr_id'],
+            $extraContext['message']
         );
 
         $options = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES;
@@ -42,22 +74,30 @@ class LoggerService
             $options |= JSON_INVALID_UTF8_SUBSTITUTE;
         }
 
-        $encodedContext = json_encode($context, $options);
+        $encodedContext = json_encode($extraContext, $options);
 
         if ($encodedContext === false) {
             $encodedContext = json_encode([
                 'encoding_error' => true,
-                'original' => array_keys($context),
+                'original' => array_keys($extraContext),
             ], $options);
         }
 
+        $stmt = $this->connection->prepare(
+            'INSERT INTO logs (actor_id, level, action, message, context, ip_address, route, service, corr_id)'
+            . ' VALUES (:actor_id, :level, :action, :message, :context, :ip_address, :route, :service, :corr_id)'
+        );
+
         $stmt->execute([
-            'user_id' => $context['user_id'] ?? null,
+            'actor_id' => $actorId,
             'level' => $level,
             'action' => $action,
-            'message' => $context['message'] ?? '',
+            'message' => $message,
             'context' => $encodedContext,
-            'ip_address' => $context['ip_address'] ?? null,
+            'ip_address' => $ip,
+            'route' => $route,
+            'service' => $service,
+            'corr_id' => $corrId,
         ]);
     }
 
@@ -70,7 +110,7 @@ class LoggerService
         [$where, $params] = $this->buildFilterClause($level, $filters);
 
         $sql = 'SELECT l.*, u.full_name AS user_name FROM logs l '
-            . 'LEFT JOIN users u ON u.id = l.user_id'
+            . 'LEFT JOIN users u ON u.id = l.actor_id'
             . $where
             . ' ORDER BY l.created_at DESC LIMIT :limit';
 
@@ -108,7 +148,7 @@ class LoggerService
             ];
         }, $levelsStmt->fetchAll(PDO::FETCH_ASSOC));
 
-        $serviceSql = 'SELECT COALESCE(NULLIF(SUBSTRING_INDEX(l.action, ".", 1), ""), "sistema") AS label,'
+        $serviceSql = 'SELECT COALESCE(NULLIF(l.service, ""), "sistema") AS label,'
             . ' COUNT(*) AS total FROM logs l'
             . $where
             . ' GROUP BY label ORDER BY total DESC LIMIT 6';
@@ -171,19 +211,25 @@ class LoggerService
 
         $service = isset($filters['service']) ? trim((string) $filters['service']) : '';
         if ($service !== '') {
-            $conditions[] = 'l.action LIKE :service';
-            $params['service'] = $service . '.%';
+            $conditions[] = 'l.service = :service';
+            $params['service'] = $service;
         }
 
         if (!empty($filters['user']) && is_numeric($filters['user'])) {
-            $conditions[] = 'l.user_id = :user_id';
+            $conditions[] = 'l.actor_id = :user_id';
             $params['user_id'] = (int) $filters['user'];
         }
 
         $search = isset($filters['search']) ? trim((string) $filters['search']) : '';
         if ($search !== '') {
-            $conditions[] = '(l.action LIKE :search OR l.message LIKE :search OR l.context LIKE :search)';
+            $conditions[] = '(
+                l.action LIKE :search
+                OR l.message LIKE :search
+                OR l.context LIKE :search
+                OR l.corr_id LIKE :search_exact
+            )';
             $params['search'] = '%' . $search . '%';
+            $params['search_exact'] = $search . '%';
         }
 
         if (!empty($filters['from'])) {
@@ -202,13 +248,46 @@ class LoggerService
     }
 
     /**
+     * @param array<string, mixed> $filters
+     * @return array<int, array<string, mixed>>
+     */
+    public function streamSince(int $lastId, ?string $level = null, array $filters = [], int $limit = 50): array
+    {
+        [$where, $params] = $this->buildFilterClause($level, $filters);
+
+        $conditions = [];
+        if ($where !== '') {
+            $conditions[] = substr($where, 7);
+        }
+
+        if ($lastId > 0) {
+            $conditions[] = 'l.id > :last_id';
+            $params['last_id'] = $lastId;
+        }
+
+        $finalWhere = $conditions === [] ? '' : ' WHERE ' . implode(' AND ', $conditions);
+
+        $sql = 'SELECT l.*, u.full_name AS user_name FROM logs l ' .
+            'LEFT JOIN users u ON u.id = l.actor_id' .
+            $finalWhere .
+            ' ORDER BY l.id ASC LIMIT :limit';
+
+        $stmt = $this->connection->prepare($sql);
+        $this->bindFilterParams($stmt, $params);
+        $stmt->bindValue(':limit', max(1, $limit), PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
      * @param array<string, mixed> $params
      */
     private function bindFilterParams(\PDOStatement $stmt, array $params): void
     {
         foreach ($params as $key => $value) {
             $param = ':' . $key;
-            if ($key === 'user_id') {
+            if ($key === 'user_id' || $key === 'last_id') {
                 $stmt->bindValue($param, (int) $value, PDO::PARAM_INT);
                 continue;
             }

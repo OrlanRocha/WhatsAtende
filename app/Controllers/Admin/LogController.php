@@ -14,7 +14,7 @@ class LogController
 
     public function index(): void
     {
-        require_role('admin');
+        require_role('admin', 'dev');
 
         $level = filter_input(INPUT_GET, 'level', FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: null;
         $service = filter_input(INPUT_GET, 'service', FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: null;
@@ -43,14 +43,23 @@ class LogController
             }
             $log['context_raw'] = $raw;
             $log['context'] = $decoded;
+            $log['corr_id'] = (string) ($log['corr_id'] ?? '');
+            $log['route'] = (string) ($log['route'] ?? '');
+            $log['service'] = (string) ($log['service'] ?? '');
+            $log['actor_id'] = isset($log['actor_id']) ? (int) $log['actor_id'] : null;
             return $log;
         }, $logs);
         $aggregates = $this->logger->aggregates($level, $filters);
+        $lastId = 0;
+        foreach ($logs as $logRow) {
+            $lastId = max($lastId, (int) ($logRow['id'] ?? 0));
+        }
 
         if (is_ajax()) {
             json_response([
                 'logs' => $normalizedLogs,
                 'aggregates' => $aggregates,
+                'last_id' => $lastId,
             ]);
         }
 

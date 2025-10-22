@@ -10,6 +10,7 @@ use App\Controllers\Admin\TicketController as AdminTicketController;
 use App\Controllers\Admin\UserController as AdminUserController;
 use App\Controllers\Admin\WebhookController as AdminWebhookController;
 use App\Controllers\Api\EvolutionController as ApiEvolutionController;
+use App\Controllers\Api\LogStreamController;
 use App\Controllers\AuthController;
 use App\Controllers\TicketController;
 use App\Controllers\HealthController;
@@ -117,7 +118,25 @@ container_bind(AdminLogController::class, static fn () => new AdminLogController
 container_bind(AdminWebhookController::class, static fn () => new AdminWebhookController(resolve(SettingService::class), resolve(EvolutionService::class)));
 container_bind(AdminEvolutionController::class, static fn () => new AdminEvolutionController(resolve(EvolutionService::class)));
 container_bind(ApiEvolutionController::class, static fn () => new ApiEvolutionController(resolve(EvolutionService::class)));
+container_bind(LogStreamController::class, static fn () => new LogStreamController(resolve(LoggerService::class)));
 container_bind(HealthController::class, static fn () => new HealthController(resolve(HealthService::class)));
+
+if (!empty($GLOBALS['whats_missing_env']) && is_array($GLOBALS['whats_missing_env'])) {
+    $missingEnv = array_values(array_unique(array_map('strval', $GLOBALS['whats_missing_env'])));
+    if ($missingEnv !== []) {
+        try {
+            resolve(LoggerService::class)->error('environment.variables.missing', [
+                'message' => 'Variáveis obrigatórias ausentes no ambiente.',
+                'keys' => $missingEnv,
+            ]);
+        } catch (\Throwable $exception) {
+            app_logger()->error('environment.variables.persist_failed', [
+                'exception' => $exception->getMessage(),
+                'keys' => $missingEnv,
+            ]);
+        }
+    }
+}
 
 $routes = require base_path('routes/web.php');
 

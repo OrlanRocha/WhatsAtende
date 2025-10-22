@@ -150,20 +150,43 @@ class TicketService
 
     public function assignToUser(int $ticketId, int $userId): void
     {
+        $ticketSnapshotStmt = $this->connection->prepare(
+            'SELECT opened_at, sla_due_at FROM tickets WHERE id = :id'
+        );
+        $ticketSnapshotStmt->execute(['id' => $ticketId]);
+        $ticketSnapshot = $ticketSnapshotStmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+
         $this->connection->prepare(
-            'INSERT INTO ticket_metrics (ticket_id) VALUES (:ticket_id) '
-            . 'ON DUPLICATE KEY UPDATE ticket_id = ticket_id'
+            'INSERT INTO ticket_metrics (ticket_id) VALUES (:ticket_id) ' .
+            'ON DUPLICATE KEY UPDATE ticket_id = ticket_id'
         )->execute(['ticket_id' => $ticketId]);
 
-        $stmt = $this->connection->prepare(
+        $this->connection->prepare(
             'UPDATE tickets SET status = :status, assigned_user_id = :user_id WHERE id = :id'
-        );
-
-        $stmt->execute([
+        )->execute([
             'status' => Ticket::STATUS_ASSIGNED,
             'user_id' => $userId,
             'id' => $ticketId,
         ]);
+
+        $metricFragments = ['last_touch_at = NOW()'];
+        $metricParams = ['ticket_id' => $ticketId];
+        if (!empty($ticketSnapshot['opened_at'])) {
+            $metricFragments[] = 'queue_time_sec = COALESCE(queue_time_sec, TIMESTAMPDIFF(SECOND, :opened_at, NOW()))';
+            $metricParams['opened_at'] = $ticketSnapshot['opened_at'];
+        }
+        if (!empty($ticketSnapshot['sla_due_at'])) {
+            $metricFragments[] = 'sla_due_at = COALESCE(sla_due_at, :sla_due_at)';
+            $metricParams['sla_due_at'] = $ticketSnapshot['sla_due_at'];
+            $status = $this->calculateSlaStatus((string) $ticketSnapshot['sla_due_at'], new DateTimeImmutable());
+            if ($status !== null) {
+                $metricFragments[] = 'sla_status = :sla_status';
+                $metricParams['sla_status'] = $status;
+            }
+        }
+        $metricSql = 'UPDATE ticket_metrics SET ' . implode(', ', $metricFragments) . ' WHERE ticket_id = :ticket_id';
+        $metricStmt = $this->connection->prepare($metricSql);
+        $metricStmt->execute($metricParams);
 
         $this->logger->info('ticket.assigned', [
             'ticket_id' => $ticketId,
@@ -285,7 +308,7 @@ class TicketService
         ]);
 
         $this->connection->prepare(
-            'UPDATE ticket_metrics SET last_response_at = :now, first_response_at = COALESCE(first_response_at, :now) WHERE ticket_id = :ticket_id'
+            'UPDATE ticket_metrics SET last_touch_at = :now, first_response_at = COALESCE(first_response_at, :now) WHERE ticket_id = :ticket_id'
         )->execute([
             'now' => $now,
             'ticket_id' => $ticketId,
@@ -304,28 +327,41 @@ class TicketService
 
     public function resolveTicket(int $ticketId): void
     {
-        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
-        $stmtTicket = $this->connection->prepare('SELECT opened_at FROM tickets WHERE id = :id');
+        $nowDate = new DateTimeImmutable();
+        $now = $nowDate->format('Y-m-d H:i:s');
+        $stmtTicket = $this->connection->prepare('SELECT opened_at, sla_due_at FROM tickets WHERE id = :id');
         $stmtTicket->execute(['id' => $ticketId]);
-        $openedAt = $stmtTicket->fetchColumn();
+        $ticketRow = $stmtTicket->fetch(\PDO::FETCH_ASSOC) ?: null;
 
-        $stmt = $this->connection->prepare(
+        $this->connection->prepare(
             'UPDATE tickets SET status = :status, closed_at = :closed_at WHERE id = :id'
-        );
-        $stmt->execute([
+        )->execute([
             'status' => Ticket::STATUS_RESOLVED,
             'closed_at' => $now,
             'id' => $ticketId,
         ]);
 
-        $this->connection->prepare(
-            'UPDATE ticket_metrics SET resolution_time_seconds = TIMESTAMPDIFF(SECOND, :opened_at, :closed_at)
-             WHERE ticket_id = :ticket_id'
-        )->execute([
-            'opened_at' => $openedAt,
+        $metricSql = 'UPDATE ticket_metrics SET last_touch_at = :closed_at';
+        $metricParams = [
             'closed_at' => $now,
             'ticket_id' => $ticketId,
-        ]);
+        ];
+
+        if ($ticketRow && !empty($ticketRow['opened_at'])) {
+            $metricSql .= ', resolution_time_sec = TIMESTAMPDIFF(SECOND, :opened_at, :closed_at)';
+            $metricParams['opened_at'] = $ticketRow['opened_at'];
+        }
+
+        if ($ticketRow && !empty($ticketRow['sla_due_at'])) {
+            $status = $this->calculateSlaStatus((string) $ticketRow['sla_due_at'], $nowDate);
+            if ($status !== null) {
+                $metricSql .= ', sla_status = :sla_status';
+                $metricParams['sla_status'] = $status;
+            }
+        }
+
+        $metricSql .= ' WHERE ticket_id = :ticket_id';
+        $this->connection->prepare($metricSql)->execute($metricParams);
 
         $this->logger->info('ticket.resolved', ['ticket_id' => $ticketId]);
 
@@ -874,7 +910,8 @@ class TicketService
         $ticketId = (int) $this->connection->lastInsertId();
 
         $this->connection->prepare(
-            'INSERT INTO ticket_metrics (ticket_id, first_response_at) VALUES (:ticket_id, NULL)'
+            'INSERT INTO ticket_metrics (ticket_id) VALUES (:ticket_id)'
+            . ' ON DUPLICATE KEY UPDATE ticket_id = ticket_id'
         )->execute(['ticket_id' => $ticketId]);
 
         $this->logger->info('ticket.created_from_native', [
@@ -1033,5 +1070,30 @@ class TicketService
         $externalId = $stmt->fetchColumn();
 
         return $externalId !== false ? (string) $externalId : null;
+    }
+
+
+    private function calculateSlaStatus(?string $slaDueAt, DateTimeImmutable $reference): ?string
+    {
+        if ($slaDueAt === null || trim($slaDueAt) === '') {
+            return null;
+        }
+
+        try {
+            $due = new DateTimeImmutable($slaDueAt);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if ($due < $reference) {
+            return 'breach';
+        }
+
+        $delta = $due->getTimestamp() - $reference->getTimestamp();
+        if ($delta <= 900) {
+            return 'warning';
+        }
+
+        return 'ok';
     }
 }

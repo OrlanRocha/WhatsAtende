@@ -8,6 +8,7 @@ use App\Controllers\Admin\TicketController as AdminTicketController;
 use App\Controllers\Admin\UserController as AdminUserController;
 use App\Controllers\Admin\WebhookController as AdminWebhookController;
 use App\Controllers\Api\EvolutionController as ApiEvolutionController;
+use App\Controllers\Api\LogStreamController;
 use App\Controllers\AuthController;
 use App\Controllers\TicketController;
 use App\Controllers\WebhookController;
@@ -40,6 +41,7 @@ return [
     ['GET', '/api/evolution/media', [ApiEvolutionController::class, 'media']],
     ['POST', '/api/evolution/messages', [ApiEvolutionController::class, 'send']],
     ['POST', '/api/evolution/read', [ApiEvolutionController::class, 'markRead']],
+    ['GET', '/api/logs/live', [LogStreamController::class, 'live']],
     ['GET', '/login', [AuthController::class, 'showLoginForm']],
     ['POST', '/login', [AuthController::class, 'login']],
     ['POST', '/logout', [AuthController::class, 'logout']],

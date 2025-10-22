@@ -127,20 +127,24 @@ include base_path('app/Views/partials/topbar.php');
                     <th>Serviço</th>
                     <th>Ação</th>
                     <th>Mensagem</th>
+                    <th>Rota</th>
+                    <th>Corr ID</th>
                     <th>Usuário</th>
                     <th>IP</th>
                     <th></th>
                 </tr>
                 </thead>
                 <tbody>
-                <?php foreach ($logs as $log): ?>
-                    <?php $service = explode('.', (string) ($log['action'] ?? ''), 2)[0] ?? 'sistema'; ?>
-                    <tr data-log-row data-log-context='<?= htmlspecialchars((string) ($log['context_raw'] ?? 'null'), ENT_QUOTES) ?>'>
+                <?php foreach ($logs as $index => $log): ?>
+                    <?php $service = $log['service'] !== '' ? $log['service'] : (explode('.', (string) ($log['action'] ?? ''), 2)[0] ?? 'sistema'); ?>
+                    <tr data-log-row data-log-index="<?= (int) $index ?>">
                         <td><?= htmlspecialchars(date('d/m/Y H:i', strtotime((string) ($log['created_at'] ?? 'now')))) ?></td>
                         <td><span class="status-badge status-badge--<?= htmlspecialchars((string) ($log['level'] ?? 'info')) ?>"><?= htmlspecialchars((string) ($log['level'] ?? 'info')) ?></span></td>
                         <td><?= htmlspecialchars($service) ?></td>
                         <td><?= htmlspecialchars((string) ($log['action'] ?? '')) ?></td>
                         <td><?= htmlspecialchars((string) ($log['message'] ?? '')) ?></td>
+                        <td><code><?= htmlspecialchars((string) ($log['route'] ?? '')) ?></code></td>
+                        <td><code class="text-muted"><?= htmlspecialchars((string) ($log['corr_id'] ?? '')) ?></code></td>
                         <td><?= htmlspecialchars((string) ($log['user_name'] ?? 'Sistema')) ?></td>
                         <td><?= htmlspecialchars((string) ($log['ip_address'] ?? '-')) ?></td>
                         <td class="text-end">

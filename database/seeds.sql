@@ -92,13 +92,25 @@ ON DUPLICATE KEY UPDATE
 INSERT INTO ticket_metrics (
     ticket_id,
     first_response_at,
-    last_response_at,
-    resolution_time_seconds
+    last_touch_at,
+    queue_time_sec,
+    sla_due_at,
+    sla_status
 ) VALUES
-    (1, NOW() - INTERVAL 90 MINUTE, NOW() - INTERVAL 15 MINUTE, NULL)
+    (
+        1,
+        NOW() - INTERVAL 90 MINUTE,
+        NOW() - INTERVAL 15 MINUTE,
+        900,
+        NOW() + INTERVAL 2 HOUR,
+        'ok'
+    )
 ON DUPLICATE KEY UPDATE
     first_response_at = VALUES(first_response_at),
-    last_response_at = VALUES(last_response_at);
+    last_touch_at = VALUES(last_touch_at),
+    queue_time_sec = VALUES(queue_time_sec),
+    sla_due_at = VALUES(sla_due_at),
+    sla_status = VALUES(sla_status);
 
 INSERT INTO messages (
     id,
@@ -122,17 +134,35 @@ ON DUPLICATE KEY UPDATE
 -- Seed a log entry to illustrate auditing
 INSERT INTO logs (
     id,
-    user_id,
+    actor_id,
+    corr_id,
     level,
+    service,
     action,
     message,
     context,
     ip_address,
+    route,
     created_at
 ) VALUES
-    (1, 1, 'info', 'seed_import', 'Dados de exemplo carregados para demonstração.', NULL, '127.0.0.1', NOW())
+    (
+        1,
+        1,
+        'seed-log-1',
+        'info',
+        'seed',
+        'seed.import',
+        'Dados de exemplo carregados para demonstração.',
+        NULL,
+        '127.0.0.1',
+        '/',
+        NOW()
+    )
 ON DUPLICATE KEY UPDATE
     message = VALUES(message),
+    service = VALUES(service),
+    action = VALUES(action),
+    route = VALUES(route),
     created_at = NOW();
 
 INSERT INTO settings (

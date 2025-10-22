@@ -6,6 +6,7 @@
     --color-warning: #f97316;
     --color-danger: #ef4444;
     --color-info: #0ea5e9;
+    --color-accent: #9333ea;
     --color-surface: #ffffff;
     --color-surface-muted: #f3f4f6;
     --color-border: #d1d5db;
@@ -19,6 +20,7 @@
     --space-4: 1rem;
     --space-6: 1.5rem;
     --space-8: 2rem;
+    --focus-ring: 0 0 0 3px rgba(37, 99, 235, 0.35);
     color-scheme: light;
 }
 
@@ -31,6 +33,7 @@ html[data-theme="dark"] {
     --color-text-muted: #9ca3af;
     --shadow-md: 0 8px 24px rgba(2, 6, 23, 0.55);
     --shadow-lg: 0 20px 48px rgba(2, 6, 23, 0.75);
+    --focus-ring: 0 0 0 3px rgba(147, 51, 234, 0.45);
     color-scheme: dark;
 }
 
