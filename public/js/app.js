@@ -11,6 +11,7 @@ let lastKey = null;
 const APP_BASE_PATH = window.__APP_BASE_PATH || '';
 const APP_BASE_ORIGIN = window.__APP_BASE_ORIGIN || window.location.origin;
 const APP_BASE_URL = window.__APP_BASE_URL || `${APP_BASE_ORIGIN}${APP_BASE_PATH || ''}`;
+const CURRENT_USER_ROLE = window.__APP_USER_ROLE || null;
 
 function isExternalUrl(value) {
     if (typeof value !== 'string') {
@@ -660,9 +661,11 @@ function initKeyboardShortcuts() {
         }
 
         if (modifier && event.key.toLowerCase() === 'l') {
-            event.preventDefault();
-            window.location.assign(resolveUrl('/admin/logs'));
-            return;
+            if (CURRENT_USER_ROLE === 'dev') {
+                event.preventDefault();
+                window.location.assign(resolveUrl('/admin/logs'));
+                return;
+            }
         }
 
         if (modifier && event.key.toLowerCase() === 't') {
@@ -682,8 +685,10 @@ function initKeyboardShortcuts() {
                 window.location.assign(resolveUrl('/tickets'));
                 lastKey = null;
             } else if (lastKey === 'g' && event.key.toLowerCase() === 'l') {
-                event.preventDefault();
-                window.location.assign(resolveUrl('/admin/logs'));
+                if (CURRENT_USER_ROLE === 'dev') {
+                    event.preventDefault();
+                    window.location.assign(resolveUrl('/admin/logs'));
+                }
                 lastKey = null;
             }
         }

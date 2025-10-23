@@ -14,7 +14,7 @@ class EvolutionController
 
     public function chats(): void
     {
-        require_role('admin');
+        require_role('admin', 'dev');
 
         $result = $this->evolution->fetchChatsOverview();
         $statusCode = (int) ($result['status'] ?? 500);

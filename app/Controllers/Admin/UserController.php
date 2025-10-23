@@ -15,7 +15,7 @@ class UserController
 
     public function index(): void
     {
-        require_role('admin');
+        require_role('admin', 'dev');
 
         $users = $this->userService->listUsers();
 
@@ -45,7 +45,7 @@ class UserController
 
     public function store(): void
     {
-        $admin = require_role('admin');
+        $admin = require_role('admin', 'dev');
         $isAjax = is_ajax();
 
         $fullName = trim($_POST['full_name'] ?? '');
@@ -98,7 +98,7 @@ class UserController
 
     public function edit(int $userId): void
     {
-        require_role('admin');
+        require_role('admin', 'dev');
 
         $user = $this->userService->find($userId);
         if (!$user) {
@@ -118,7 +118,7 @@ class UserController
 
     public function update(int $userId): void
     {
-        $admin = require_role('admin');
+        $admin = require_role('admin', 'dev');
         $isAjax = is_ajax();
 
         $fullName = trim($_POST['full_name'] ?? '');

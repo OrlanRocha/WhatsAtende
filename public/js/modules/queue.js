@@ -118,6 +118,10 @@ const renderNativeChatRow = (chat) => {
     const profileAttr = profileUrl ? ` data-profile-url="${escapeHtml(profileUrl)}"` : '';
     const baseInitial = (chat?.name && chat.name.trim()) ? chat.name.trim() : (chat?.id ?? '');
     const initial = escapeHtml((baseInitial || '#').charAt(0).toUpperCase() || '#');
+    const lastUnreadId = typeof chat?.last_unread_message_id === 'string' ? chat.last_unread_message_id.trim() : '';
+    const fallbackLastId = typeof chat?.last_message_id === 'string' ? chat.last_message_id.trim() : '';
+    const ackId = lastUnreadId || fallbackLastId;
+    const ackAttr = ackId ? ` data-last-message-id="${escapeHtml(ackId)}"` : '';
 
     return `
         <tr>
@@ -136,7 +140,7 @@ const renderNativeChatRow = (chat) => {
             <td>${unreadBadge}</td>
             <td>${chat?.last_message_at ? escapeHtml(chat.last_message_at) : '—'}</td>
             <td class="text-end">
-                <button class="btn btn-sm btn-primary" data-start-native data-remote="${remoteId}" data-name="${escapeHtml(chat?.name ?? '')}">
+                <button class="btn btn-sm btn-primary" data-start-native data-remote="${remoteId}" data-name="${escapeHtml(chat?.name ?? '')}"${ackAttr}>
                     <i class="bi bi-chat-dots"></i> Iniciar conversa
                 </button>
             </td>
@@ -417,6 +421,7 @@ export function initQueue(selector, endpoint, nativeConfig = {}) {
            const payload = {
                remote_jid: startNative.getAttribute('data-remote') ?? '',
                name: startNative.getAttribute('data-name') ?? '',
+               last_message_id: startNative.getAttribute('data-last-message-id') ?? '',
            };
            const data = await request(nativeState.startEndpoint, {
                method: 'POST',

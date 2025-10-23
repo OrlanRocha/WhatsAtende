@@ -14,7 +14,7 @@ class LogController
 
     public function index(): void
     {
-        require_role('admin', 'dev');
+        require_role('dev');
 
         $level = filter_input(INPUT_GET, 'level', FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: null;
         $service = filter_input(INPUT_GET, 'service', FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: null;

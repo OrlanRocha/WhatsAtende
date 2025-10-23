@@ -10,11 +10,11 @@ $instances = $instances ?? [
 $navItems = [
     ['href' => route_path('/tickets'), 'icon' => 'bi-chat-dots', 'label' => 'Atendimentos'],
     ['href' => route_path('/tickets/today'), 'icon' => 'bi-inboxes', 'label' => 'Fila'],
-    ['href' => route_path('/admin/templates'), 'icon' => 'bi-stickies', 'label' => 'Templates', 'roles' => ['admin']],
-    ['href' => route_path('/admin/logs'), 'icon' => 'bi-activity', 'label' => 'Logs', 'roles' => ['admin']],
-    ['href' => route_path('/admin/webhook'), 'icon' => 'bi-plug', 'label' => 'Webhook', 'roles' => ['admin']],
-    ['href' => route_path('/admin'), 'icon' => 'bi-speedometer2', 'label' => 'Configurações', 'roles' => ['admin']],
-    ['href' => route_path('/admin/evolution/chats'), 'icon' => 'bi-lightning-charge', 'label' => 'Admin', 'roles' => ['admin']],
+    ['href' => route_path('/admin/templates'), 'icon' => 'bi-stickies', 'label' => 'Templates', 'roles' => ['admin', 'dev']],
+    ['href' => route_path('/admin/logs'), 'icon' => 'bi-activity', 'label' => 'Logs', 'roles' => ['dev']],
+    ['href' => route_path('/admin/webhook'), 'icon' => 'bi-plug', 'label' => 'Webhook', 'roles' => ['dev']],
+    ['href' => route_path('/admin'), 'icon' => 'bi-speedometer2', 'label' => 'Configurações', 'roles' => ['admin', 'dev']],
+    ['href' => route_path('/admin/evolution/chats'), 'icon' => 'bi-lightning-charge', 'label' => 'Admin', 'roles' => ['admin', 'dev']],
 ];
 
 $navItems = array_filter($navItems, static function (array $item) use ($user): bool {

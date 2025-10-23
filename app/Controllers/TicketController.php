@@ -157,7 +157,7 @@ class TicketController
     public function assign(int $ticketId): void
     {
         $user = require_auth();
-        if (!in_array($user->role ?? null, ['admin', 'agent'], true)) {
+        if (!in_array($user->role ?? null, ['admin', 'agent', 'dev'], true)) {
             if (is_ajax()) {
                 json_response(['message' => 'Acesso restrito a atendentes.'], 403);
             }
@@ -166,7 +166,7 @@ class TicketController
             return;
         }
         $userId = (int) $user->id;
-        $this->ticketService->assignToUser($ticketId, $userId);
+        $this->ticketService->assignToUser($ticketId, $userId, null);
 
         if (is_ajax()) {
             json_response([
@@ -181,7 +181,7 @@ class TicketController
     public function startNativeConversation(): void
     {
         $user = require_auth();
-        if (!in_array($user->role ?? null, ['admin', 'agent'], true)) {
+        if (!in_array($user->role ?? null, ['admin', 'agent', 'dev'], true)) {
             json_response(['error' => 'Acesso restrito a atendentes.'], 403);
             return;
         }
@@ -190,12 +190,14 @@ class TicketController
 
         $remoteJid = trim((string) ($payload['remote_jid'] ?? $_POST['remote_jid'] ?? ''));
         $name = trim((string) ($payload['name'] ?? $_POST['name'] ?? ''));
+        $lastMessageId = trim((string) ($payload['last_message_id'] ?? $_POST['last_message_id'] ?? ''));
 
         try {
             $ticketId = $this->ticketService->startNativeConversation(
                 $remoteJid,
                 $name !== '' ? $name : null,
-                (int) $user->id
+                (int) $user->id,
+                $lastMessageId !== '' ? $lastMessageId : null
             );
         } catch (InvalidArgumentException $exception) {
             $this->logger->warning('ticket.native_start_validation_failed', [
@@ -249,7 +251,7 @@ class TicketController
     public function storeMessage(int $ticketId): void
     {
         $user = require_auth();
-        if (!in_array($user->role ?? null, ['admin', 'agent'], true)) {
+        if (!in_array($user->role ?? null, ['admin', 'agent', 'dev'], true)) {
             if (is_ajax()) {
                 json_response(['message' => 'Acesso restrito a atendentes.'], 403);
             }
@@ -434,7 +436,7 @@ class TicketController
     public function resolve(int $ticketId): void
     {
         $user = require_auth();
-        if (!in_array($user->role ?? null, ['admin', 'agent'], true)) {
+        if (!in_array($user->role ?? null, ['admin', 'agent', 'dev'], true)) {
             if (is_ajax()) {
                 json_response(['message' => 'Acesso restrito a atendentes.'], 403);
             }

@@ -558,38 +558,65 @@ class EvolutionService
 
         $messages = $this->extractMessages($chat);
         $calculatedUnread = 0;
+        $lastMessageId = null;
+        $lastMessageTimestamp = null;
+        $lastInboundUnreadId = null;
+        $lastInboundUnreadTimestamp = null;
+
         foreach ($messages as $message) {
             if (!is_array($message)) {
                 continue;
             }
 
-            $type = strtolower((string) ($message['messageType'] ?? $message['type'] ?? ''));
-            if ($type !== '' && $type !== 'conversation') {
+            $normalizedMessage = $this->normalizeConversationMessage($message, $id);
+            if ($normalizedMessage === null) {
                 continue;
             }
 
-            $fromMe = (bool) ($message['key']['fromMe'] ?? $message['fromMe'] ?? false);
+            $messageId = (string) ($normalizedMessage['id'] ?? '');
+            $messageTimestamp = $normalizedMessage['sent_at'] ?? null;
+            if ($messageId !== '' && $messageTimestamp !== null) {
+                if ($lastMessageTimestamp === null || strcmp($messageTimestamp, $lastMessageTimestamp) >= 0) {
+                    $lastMessageTimestamp = $messageTimestamp;
+                    $lastMessageId = $messageId;
+                }
+            }
+
+            $fromMe = (bool) ($normalizedMessage['from_me'] ?? false);
             if ($fromMe) {
                 continue;
             }
 
-            $status = strtoupper((string) ($message['status'] ?? ''));
+            $status = strtoupper((string) ($normalizedMessage['status'] ?? ''));
             if ($status === 'READ') {
                 continue;
             }
 
             $calculatedUnread++;
+            if ($messageId !== '' && $messageTimestamp !== null) {
+                if ($lastInboundUnreadTimestamp === null || strcmp($messageTimestamp, $lastInboundUnreadTimestamp) >= 0) {
+                    $lastInboundUnreadTimestamp = $messageTimestamp;
+                    $lastInboundUnreadId = $messageId;
+                }
+            }
         }
 
         if ($calculatedUnread > 0) {
             $unread = $calculatedUnread;
         } elseif ($unread === 0 && isset($chat['lastMessage']) && is_array($chat['lastMessage'])) {
-            $lastMessage = $chat['lastMessage'];
-            $status = strtoupper((string) ($lastMessage['status'] ?? ''));
-            $fromMe = (bool) ($lastMessage['key']['fromMe'] ?? $lastMessage['fromMe'] ?? false);
-
-            if ($status !== 'READ' && !$fromMe) {
-                $unread = 1;
+            $lastMessage = $this->normalizeConversationMessage($chat['lastMessage'], $id);
+            if ($lastMessage !== null) {
+                $status = strtoupper((string) ($lastMessage['status'] ?? ''));
+                $fromMe = (bool) ($lastMessage['from_me'] ?? false);
+                if ($status !== 'READ' && !$fromMe) {
+                    $unread = 1;
+                    if ($lastInboundUnreadId === null && ($lastMessage['id'] ?? '') !== '') {
+                        $lastInboundUnreadId = (string) $lastMessage['id'];
+                    }
+                }
+                if ($lastMessageId === null && ($lastMessage['id'] ?? '') !== '') {
+                    $lastMessageId = (string) $lastMessage['id'];
+                }
             }
         }
 
@@ -654,6 +681,8 @@ class EvolutionService
             'created_at' => $createdAt,
             'opened_today' => $openedToday,
             'profile_url' => $profileUrl,
+            'last_message_id' => $lastMessageId,
+            'last_unread_message_id' => $lastInboundUnreadId,
             'raw' => $chat,
         ];
     }

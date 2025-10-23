@@ -15,7 +15,7 @@ class LogStreamController
 
     public function live(): void
     {
-        require_role('admin', 'dev');
+        require_role('dev');
 
         ignore_user_abort(true);
         set_time_limit(0);

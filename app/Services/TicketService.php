@@ -115,7 +115,7 @@ class TicketService
         return $result;
     }
 
-    public function startNativeConversation(string $remoteJid, ?string $contactName, int $userId): int
+    public function startNativeConversation(string $remoteJid, ?string $contactName, int $userId, ?string $lastMessageId = null): int
     {
         $remoteJid = trim($remoteJid);
         if ($remoteJid === '') {
@@ -143,12 +143,12 @@ class TicketService
             throw $exception;
         }
 
-        $this->assignToUser($ticketId, $userId);
+        $this->assignToUser($ticketId, $userId, $lastMessageId);
 
         return $ticketId;
     }
 
-    public function assignToUser(int $ticketId, int $userId): void
+    public function assignToUser(int $ticketId, int $userId, ?string $lastMessageId = null): void
     {
         $ticketSnapshotStmt = $this->connection->prepare(
             'SELECT opened_at, sla_due_at FROM tickets WHERE id = :id'
@@ -198,9 +198,108 @@ class TicketService
         if (($integration['integration_mode'] ?? 'webhook') === 'native') {
             $contactExternalId = $this->getContactExternalId($ticketId);
             if ($contactExternalId) {
+                $this->acknowledgeNativeConversation($contactExternalId, $lastMessageId);
                 $this->evolution->sendDefaultTemplate($contactExternalId);
             }
         }
+    }
+
+    public function acknowledgeNativeConversation(string $remoteJid, ?string $messageId = null): void
+    {
+        $remoteJid = trim($remoteJid);
+        if ($remoteJid === '') {
+            return;
+        }
+
+        $integration = $this->settings->integrationSettings();
+        if (($integration['integration_mode'] ?? 'webhook') !== 'native' || !$this->evolution->isNativeEnabled()) {
+            return;
+        }
+
+        $targetMessageId = null;
+
+        if ($messageId !== null) {
+            $messageId = trim($messageId);
+            if ($messageId !== '') {
+                $targetMessageId = $messageId;
+            }
+        }
+
+        $messages = [];
+        if ($targetMessageId === null) {
+            $history = $this->evolution->fetchConversationMessages($remoteJid, 50);
+            if (!($history['success'] ?? false)) {
+                $this->logger->warning('ticket.native_mark_read_failed', [
+                    'remote_jid' => $remoteJid,
+                    'error' => $history['error'] ?? 'Falha ao buscar histórico da conversa para marcar como lida.',
+                ]);
+
+                return;
+            }
+
+            $messages = is_array($history['messages'] ?? null) ? $history['messages'] : [];
+        }
+
+        if ($targetMessageId === null) {
+            foreach (array_reverse($messages) as $message) {
+                if (!is_array($message)) {
+                    continue;
+                }
+
+                $fromMe = (bool) ($message['from_me'] ?? false);
+                if ($fromMe) {
+                    continue;
+                }
+
+                $status = strtoupper((string) ($message['status'] ?? ''));
+                if ($status === 'READ') {
+                    continue;
+                }
+
+                $candidate = $message['id'] ?? null;
+                if (is_string($candidate) && $candidate !== '') {
+                    $targetMessageId = $candidate;
+                    break;
+                }
+            }
+        }
+
+        if ($targetMessageId === null) {
+            foreach (array_reverse($messages) as $message) {
+                if (!is_array($message)) {
+                    continue;
+                }
+
+                if (!($message['from_me'] ?? false)) {
+                    $candidate = $message['id'] ?? null;
+                    if (is_string($candidate) && $candidate !== '') {
+                        $targetMessageId = $candidate;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if ($targetMessageId === null) {
+            return;
+        }
+
+        $result = $this->evolution->markAsRead($remoteJid, $targetMessageId);
+        if (!($result['success'] ?? false)) {
+            $this->logger->warning('ticket.native_mark_read_failed', [
+                'remote_jid' => $remoteJid,
+                'message_id' => $targetMessageId,
+                'status' => $result['status'] ?? null,
+                'error' => $result['error'] ?? $result['error_detail'] ?? null,
+            ]);
+
+            return;
+        }
+
+        $this->logger->info('ticket.native_marked_read', [
+            'remote_jid' => $remoteJid,
+            'message_id' => $targetMessageId,
+        ]);
     }
 
     /**
@@ -463,6 +562,30 @@ class TicketService
             'deduplicated' => $duplicates,
             'added_from_database' => $addedFromDatabase,
         ]);
+
+        if ($remoteJid !== '') {
+            $lastUnreadRemoteId = null;
+            foreach (array_reverse($normalizedNative) as $message) {
+                if (($message['sender_type'] ?? '') !== 'contact') {
+                    continue;
+                }
+
+                $status = strtoupper((string) ($message['status'] ?? ''));
+                if ($status === 'READ') {
+                    continue;
+                }
+
+                $candidate = $message['remote_id'] ?? $message['id'] ?? null;
+                if (is_string($candidate) && $candidate !== '') {
+                    $lastUnreadRemoteId = $candidate;
+                    break;
+                }
+            }
+
+            if ($lastUnreadRemoteId !== null) {
+                $this->acknowledgeNativeConversation($remoteJid, $lastUnreadRemoteId);
+            }
+        }
 
         return $normalizedNative;
     }

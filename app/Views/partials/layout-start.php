@@ -36,6 +36,7 @@ $themeStorageKey = 'whats-theme-preference';
         window.__APP_BASE_PATH = <?= json_encode(rtrim(route_path('/'), '/')) ?>;
         window.__APP_BASE_ORIGIN = <?= json_encode(app_base_origin()) ?>;
         window.__APP_BASE_URL = <?= json_encode(rtrim(url('/'), '/')) ?>;
+        window.__APP_USER_ROLE = <?= json_encode(auth()?->role ?? null) ?>;
     </script>
 </head>
 <body class="app-body" data-theme="light">
