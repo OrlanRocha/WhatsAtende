@@ -15,7 +15,11 @@ $cookieDomain = '';
 if ($host !== '') {
     $hostWithoutPort = explode(':', $host)[0] ?? '';
 
-    if ($hostWithoutPort !== '' && strpos($hostWithoutPort, '.') !== false) {
+    if (
+        $hostWithoutPort !== ''
+        && strpos($hostWithoutPort, '.') !== false
+        && filter_var($hostWithoutPort, FILTER_VALIDATE_IP) === false
+    ) {
         $cookieDomain = $hostWithoutPort;
     }
 }
