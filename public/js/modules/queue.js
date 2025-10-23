@@ -148,6 +148,19 @@ const renderNativeChatRow = (chat) => {
     `;
 };
 
+const renderNativeChats = (tbody, chats = []) => {
+    if (!tbody) {
+        return;
+    }
+
+    if (!Array.isArray(chats) || chats.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">Nenhuma conversa pendente.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = chats.map((chat) => renderNativeChatRow(chat)).join('');
+};
+
 const updateMetrics = (container, summary = {}) => {
     if (!container) {
         return;
