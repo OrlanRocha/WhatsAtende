@@ -2,11 +2,15 @@
 /** @var array<int, array<string, mixed>> $templates */
 /** @var string|null $status */
 /** @var string|null $error */
+$breadcrumbs = [
+    ['label' => 'Admin', 'href' => '/admin'],
+    ['label' => 'Templates'],
+];
 $pageTitle = 'Templates · WhatsAtende';
 include base_path('app/Views/partials/layout-start.php');
-include base_path('app/Views/admin/partials/nav.php');
+include base_path('app/Views/partials/topbar.php');
 ?>
-<div class="container-xxl py-4">
+<div class="workspace">
     <div class="d-flex flex-column flex-lg-row justify-content-between align-items-start align-items-lg-center gap-3 mb-4">
         <div>
             <h1 class="h3 fw-semibold mb-1">Scripts e Templates</h1>
@@ -102,8 +106,8 @@ include base_path('app/Views/admin/partials/nav.php');
 </div>
 
 <script type="module">
-import { initTemplateModal, refreshTemplateTable } from '/js/modules/templates.js';
+import { initTemplateModal, refreshTemplateTable } from <?= json_encode(route_path('/js/modules/templates.js')) ?>;
 initTemplateModal('#templateModal', '#templateForm');
-window.addEventListener('templates:refresh', () => refreshTemplateTable('#templates-table', '/admin/templates'));
+window.addEventListener('templates:refresh', () => refreshTemplateTable('#templates-table', <?= json_encode(route_path('/admin/templates')) ?>));
 </script>
 <?php include base_path('app/Views/partials/layout-end.php'); ?>

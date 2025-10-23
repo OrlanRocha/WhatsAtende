@@ -1,20 +1,24 @@
 <?php
 
 use App\Controllers\Admin\DashboardController as AdminDashboardController;
+use App\Controllers\Admin\EvolutionController as AdminEvolutionController;
 use App\Controllers\Admin\LogController as AdminLogController;
 use App\Controllers\Admin\TemplateController as AdminTemplateController;
 use App\Controllers\Admin\TicketController as AdminTicketController;
 use App\Controllers\Admin\UserController as AdminUserController;
 use App\Controllers\Admin\WebhookController as AdminWebhookController;
 use App\Controllers\Api\EvolutionController as ApiEvolutionController;
+use App\Controllers\Api\LogStreamController;
 use App\Controllers\AuthController;
 use App\Controllers\TicketController;
 use App\Controllers\WebhookController;
+use App\Controllers\HealthController;
 
 return [
     ['GET', '/', [TicketController::class, 'index']],
     ['GET', '/admin', [AdminDashboardController::class, 'index']],
     ['GET', '/admin/tickets', [AdminTicketController::class, 'index']],
+    ['GET', '/admin/evolution/chats', [AdminEvolutionController::class, 'chats']],
     ['GET', '/admin/users', [AdminUserController::class, 'index']],
     ['GET', '/admin/users/create', [AdminUserController::class, 'create']],
     ['POST', '/admin/users', [AdminUserController::class, 'store']],
@@ -37,6 +41,7 @@ return [
     ['GET', '/api/evolution/media', [ApiEvolutionController::class, 'media']],
     ['POST', '/api/evolution/messages', [ApiEvolutionController::class, 'send']],
     ['POST', '/api/evolution/read', [ApiEvolutionController::class, 'markRead']],
+    ['GET', '/api/logs/live', [LogStreamController::class, 'live']],
     ['GET', '/login', [AuthController::class, 'showLoginForm']],
     ['POST', '/login', [AuthController::class, 'login']],
     ['POST', '/logout', [AuthController::class, 'logout']],
@@ -47,10 +52,14 @@ return [
     ['GET', '/reset-password/{token}', [AuthController::class, 'showResetPasswordForm']],
     ['POST', '/reset-password', [AuthController::class, 'resetPassword']],
     ['GET', '/tickets', [TicketController::class, 'index']],
+    ['GET', '/tickets/overview', [TicketController::class, 'overview']],
+    ['GET', '/tickets/today', [TicketController::class, 'today']],
     ['GET', '/tickets/{id}', [TicketController::class, 'show']],
     ['POST', '/tickets/{id}/assign', [TicketController::class, 'assign']],
+    ['POST', '/tickets/native/start', [TicketController::class, 'startNativeConversation']],
     ['POST', '/tickets/{id}/messages', [TicketController::class, 'storeMessage']],
     ['GET', '/tickets/{id}/messages', [TicketController::class, 'messages']],
     ['POST', '/tickets/{id}/resolve', [TicketController::class, 'resolve']],
+    ['GET', '/health', [HealthController::class, 'snapshot']],
     ['POST', '/api/webhook', [WebhookController::class, 'handle']],
 ];

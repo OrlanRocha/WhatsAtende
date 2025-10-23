@@ -10,6 +10,15 @@ CREATE TABLE IF NOT EXISTS roles (
     name VARCHAR(50) NOT NULL UNIQUE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS permissions (
+    id SMALLINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(120) NOT NULL UNIQUE,
+    label VARCHAR(150) NOT NULL,
+    description VARCHAR(255) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 INSERT INTO roles (name) VALUES ('admin'), ('agent')
     ON DUPLICATE KEY UPDATE name = VALUES(name);
 
@@ -26,6 +35,33 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES roles(id)
         ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user_permissions (
+    user_id BIGINT UNSIGNED NOT NULL,
+    permission_id SMALLINT UNSIGNED NOT NULL,
+    granted_by BIGINT UNSIGNED NULL,
+    granted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, permission_id),
+    CONSTRAINT fk_user_permissions_user FOREIGN KEY (user_id) REFERENCES users(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_user_permissions_permission FOREIGN KEY (permission_id) REFERENCES permissions(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_user_permissions_granted_by FOREIGN KEY (granted_by) REFERENCES users(id)
+        ON SET NULL,
+    INDEX idx_user_permissions_permission (permission_id),
+    INDEX idx_user_permissions_granted_by (granted_by)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user_status (
+    user_id BIGINT UNSIGNED PRIMARY KEY,
+    online TINYINT(1) NOT NULL DEFAULT 0,
+    last_seen_at DATETIME NULL,
+    current_load SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    skills JSON NULL,
+    CHECK (skills IS NULL OR JSON_VALID(skills)),
+    CONSTRAINT fk_user_status_user FOREIGN KEY (user_id) REFERENCES users(id)
+        ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS contacts (
@@ -45,6 +81,7 @@ CREATE TABLE IF NOT EXISTS tickets (
     subject VARCHAR(191) NULL,
     status ENUM('open','assigned','resolved','closed') NOT NULL DEFAULT 'open',
     priority ENUM('low','normal','high','urgent') NOT NULL DEFAULT 'normal',
+    predicted_priority ENUM('low','normal','high','critical') NULL,
     assigned_user_id BIGINT UNSIGNED NULL,
     opened_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     closed_at DATETIME NULL,
@@ -59,8 +96,11 @@ CREATE TABLE IF NOT EXISTS tickets (
 CREATE TABLE IF NOT EXISTS ticket_metrics (
     ticket_id BIGINT UNSIGNED PRIMARY KEY,
     first_response_at DATETIME NULL,
-    last_response_at DATETIME NULL,
-    resolution_time_seconds INT UNSIGNED NULL,
+    last_touch_at DATETIME NULL,
+    queue_time_sec INT UNSIGNED NULL,
+    resolution_time_sec INT UNSIGNED NULL,
+    sla_due_at DATETIME NULL,
+    sla_status ENUM('unset','ok','warning','breach') NOT NULL DEFAULT 'unset',
     CONSTRAINT fk_ticket_metrics_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id)
         ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -99,15 +139,18 @@ CREATE TABLE IF NOT EXISTS templates (
 
 CREATE TABLE IF NOT EXISTS logs (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT UNSIGNED NULL,
-    level ENUM('info','warning','error','critical') NOT NULL DEFAULT 'info',
+    actor_id BIGINT UNSIGNED NULL,
+    corr_id VARCHAR(64) NOT NULL,
+    level ENUM('debug','info','warning','error','critical') NOT NULL DEFAULT 'info',
+    service VARCHAR(80) NOT NULL DEFAULT 'sistema',
     action VARCHAR(150) NOT NULL,
     message TEXT NOT NULL,
     context LONGTEXT NULL,
     CHECK (context IS NULL OR JSON_VALID(context)),
     ip_address VARCHAR(45) NULL,
+    route VARCHAR(255) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_logs_user FOREIGN KEY (user_id) REFERENCES users(id)
+    CONSTRAINT fk_logs_actor FOREIGN KEY (actor_id) REFERENCES users(id)
         ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -159,8 +202,109 @@ CREATE TABLE IF NOT EXISTS settings (
         ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS live_snapshots (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    bucket DATETIME NOT NULL,
+    payload JSON NOT NULL,
+    CHECK (JSON_VALID(payload)),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS capacity_slots (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    date_hour DATETIME NOT NULL,
+    demand_p50 INT UNSIGNED NOT NULL DEFAULT 0,
+    demand_p80 INT UNSIGNED NOT NULL DEFAULT 0,
+    demand_p95 INT UNSIGNED NOT NULL DEFAULT 0,
+    required_agents_p50 INT UNSIGNED NOT NULL DEFAULT 0,
+    required_agents_p80 INT UNSIGNED NOT NULL DEFAULT 0,
+    required_agents_p95 INT UNSIGNED NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS agent_shift (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    agent_id BIGINT UNSIGNED NOT NULL,
+    start_at DATETIME NOT NULL,
+    end_at DATETIME NOT NULL,
+    channel VARCHAR(60) NOT NULL DEFAULT 'whatsapp',
+    notes VARCHAR(255) NULL,
+    CONSTRAINT fk_agent_shift_user FOREIGN KEY (agent_id) REFERENCES users(id)
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS calendar_overrides (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    date DATE NOT NULL,
+    factor DECIMAL(5,2) NOT NULL DEFAULT 1.00,
+    reason VARCHAR(191) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS ticket_ai_events (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    ticket_id BIGINT UNSIGNED NOT NULL,
+    type ENUM('summary','classify','kb','pii') NOT NULL,
+    payload JSON NULL,
+    confidence DECIMAL(5,4) NULL,
+    model_version VARCHAR(50) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    actor_id BIGINT UNSIGNED NULL,
+    CHECK (payload IS NULL OR JSON_VALID(payload)),
+    CONSTRAINT fk_ticket_ai_events_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_ticket_ai_events_actor FOREIGN KEY (actor_id) REFERENCES users(id)
+        ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS ticket_summary (
+    ticket_id BIGINT UNSIGNED PRIMARY KEY,
+    short TEXT NULL,
+    medium TEXT NULL,
+    full MEDIUMTEXT NULL,
+    model_version VARCHAR(50) NULL,
+    confidence DECIMAL(5,4) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by BIGINT UNSIGNED NULL,
+    CONSTRAINT fk_ticket_summary_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_ticket_summary_user FOREIGN KEY (created_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS kb_articles (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(191) NOT NULL,
+    body_md MEDIUMTEXT NOT NULL,
+    tags JSON NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    CHECK (tags IS NULL OR JSON_VALID(tags))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS kb_vectors (
+    article_id BIGINT UNSIGNED PRIMARY KEY,
+    vector BLOB NOT NULL,
+    dim SMALLINT UNSIGNED NOT NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_kb_vectors_article FOREIGN KEY (article_id) REFERENCES kb_articles(id)
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE INDEX idx_tickets_status ON tickets(status);
 CREATE INDEX idx_tickets_assigned_user ON tickets(assigned_user_id);
+CREATE INDEX idx_ticket_sla_due_at ON tickets(sla_due_at);
+CREATE INDEX idx_ticket_predicted_priority ON tickets(predicted_priority);
 CREATE INDEX idx_messages_ticket_sent_at ON messages(ticket_id, sent_at);
+CREATE INDEX idx_messages_created_at ON messages(sent_at);
+CREATE UNIQUE INDEX idx_logs_corr ON logs(corr_id);
+CREATE INDEX idx_logs_service_level ON logs(service, level);
 CREATE INDEX idx_logs_created_at ON logs(created_at);
+CREATE INDEX idx_user_status_online_load ON user_status(online, current_load);
+CREATE INDEX idx_live_snapshots_bucket ON live_snapshots(bucket);
+CREATE UNIQUE INDEX idx_capacity_slots_date_hour ON capacity_slots(date_hour);
+CREATE INDEX idx_agent_shift_window ON agent_shift(agent_id, start_at, end_at);
+CREATE UNIQUE INDEX idx_calendar_overrides_date ON calendar_overrides(date);
+CREATE INDEX idx_ticket_ai_events_ticket ON ticket_ai_events(ticket_id);
+CREATE INDEX idx_kb_vectors_article ON kb_vectors(article_id);
 CREATE INDEX idx_password_resets_expires_at ON password_resets(expires_at);

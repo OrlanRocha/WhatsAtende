@@ -150,7 +150,8 @@ class WebhookService
         $newTicketId = (int) $this->connection->lastInsertId();
 
         $this->connection->prepare(
-            'INSERT INTO ticket_metrics (ticket_id, first_response_at) VALUES (:ticket_id, NULL)'
+            'INSERT INTO ticket_metrics (ticket_id) VALUES (:ticket_id)'
+            . ' ON DUPLICATE KEY UPDATE ticket_id = ticket_id'
         )->execute(['ticket_id' => $newTicketId]);
 
         $this->logger->info('ticket.created_from_webhook', [

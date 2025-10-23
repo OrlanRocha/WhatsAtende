@@ -2,17 +2,31 @@
 /** @var string|null $status */
 /** @var string|null $error */
 $pageTitle = 'Entrar · WhatsAtende';
-include base_path('app/Views/partials/layout-start.php');
+include base_path('app/Views/partials/layout-auth-start.php');
 ?>
-<div class="auth-hero d-flex align-items-center justify-content-center py-5">
-    <div class="auth-card shadow-lg border-0 w-100" style="max-width: 440px;">
-        <div class="card-body p-4 p-lg-5">
-            <div class="text-center mb-4">
-                <i class="bi bi-chat-dots-fill text-primary fs-1"></i>
-                <h1 class="h3 fw-semibold mt-2">Bem-vindo de volta</h1>
-                <p class="text-muted">Acesse o painel para gerenciar atendimentos em tempo real.</p>
+<div class="auth-wrapper">
+    <section class="auth-showcase" aria-label="Destaques do painel">
+        <span class="auth-badge">WhatsAtende vNext</span>
+        <h1 class="auth-title">Bem-vindo de volta</h1>
+        <p class="auth-subtitle">
+            Acesse um ambiente de atendimento com Command Palette, indicadores em tempo real e fluxo unificado de tickets.
+        </p>
+        <ul class="auth-feature-list">
+            <li><i class="bi bi-lightning-charge-fill" aria-hidden="true"></i> Atalhos rápidos com <kbd>Ctrl</kbd> + <kbd>K</kbd></li>
+            <li><i class="bi bi-activity" aria-hidden="true"></i> Health widget e métricas de SLA em tempo real</li>
+            <li><i class="bi bi-shield-check" aria-hidden="true"></i> Segurança com verificação de sessão e logs detalhados</li>
+        </ul>
+    </section>
+    <section class="auth-content" aria-label="Formulário de acesso">
+        <div class="auth-card">
+            <div class="auth-card__header">
+                <i class="bi bi-chat-dots-fill" aria-hidden="true"></i>
+                <div>
+                    <h2 class="auth-card__title">Entre com suas credenciais</h2>
+                    <p class="auth-card__subtitle">Utilize o e-mail corporativo informado pelo administrador.</p>
+                </div>
             </div>
-            <div class="alert-stack mb-3">
+            <div class="alert-stack" role="status">
                 <?php if (!empty($status)): ?>
                     <div class="alert alert-success shadow-sm" role="alert"><?= htmlspecialchars($status) ?></div>
                 <?php endif; ?>
@@ -20,24 +34,24 @@ include base_path('app/Views/partials/layout-start.php');
                     <div class="alert alert-danger shadow-sm" role="alert"><?= htmlspecialchars($error) ?></div>
                 <?php endif; ?>
             </div>
-            <form method="POST" action="/login" class="vstack gap-3" data-ajax data-success-redirect="/tickets" data-success-message="Autenticado com sucesso.">
+            <form method="POST" action="<?= htmlspecialchars(route_path('/login'), ENT_QUOTES) ?>" class="vstack gap-3" data-ajax data-success-redirect="<?= htmlspecialchars(route_path('/tickets'), ENT_QUOTES) ?>" data-success-message="Autenticado com sucesso.">
                 <div>
                     <label for="email" class="form-label">E-mail</label>
-                    <input type="email" class="form-control form-control-lg" id="email" name="email" required autofocus>
+                    <input type="email" class="form-control form-control-lg" id="email" name="email" required autofocus autocomplete="email">
                 </div>
                 <div>
                     <label for="password" class="form-label">Senha</label>
-                    <input type="password" class="form-control form-control-lg" id="password" name="password" required minlength="8">
+                    <input type="password" class="form-control form-control-lg" id="password" name="password" required autocomplete="current-password">
                 </div>
                 <button type="submit" class="btn btn-primary btn-lg w-100">
                     <i class="bi bi-box-arrow-in-right"></i> Entrar
                 </button>
             </form>
-            <div class="d-flex justify-content-between align-items-center mt-4">
-                <a href="/forgot-password" class="small">Esqueceu a senha?</a>
-                <a href="/register" class="small">Criar uma conta</a>
+            <div class="auth-links">
+                <a href="<?= htmlspecialchars(route_path('/forgot-password'), ENT_QUOTES) ?>" class="link-secondary">Esqueceu a senha?</a>
+                <a href="<?= htmlspecialchars(route_path('/register'), ENT_QUOTES) ?>" class="link-secondary">Criar uma conta</a>
             </div>
         </div>
-    </div>
+    </section>
 </div>
-<?php include base_path('app/Views/partials/layout-end.php'); ?>
+<?php include base_path('app/Views/partials/layout-auth-end.php'); ?>

@@ -24,12 +24,14 @@ class UserService
             . 'r.name AS role, COUNT(t.id) AS assigned_tickets '
             . 'FROM users u '
             . 'INNER JOIN roles r ON r.id = u.role_id '
-            . 'LEFT JOIN tickets t ON t.assigned_user_id = u.id AND t.status IN (\'open\', \'assigned\') '
+            . "LEFT JOIN tickets t ON t.assigned_user_id = u.id AND t.status IN ('open', 'assigned') "
             . 'GROUP BY u.id, u.role_id, u.full_name, u.email, u.cpf, u.is_active, u.created_at, u.updated_at, r.name '
             . 'ORDER BY u.full_name ASC'
         );
 
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $users = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        return $this->hydrateUserPermissions($users);
     }
 
     /**
@@ -38,8 +40,43 @@ class UserService
     public function listRoles(): array
     {
         $stmt = $this->connection->query('SELECT id, name FROM roles ORDER BY name ASC');
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return array_map(
+            static function (array $row): array {
+                $name = (string) ($row['name'] ?? '');
+
+                return [
+                    'id' => (int) ($row['id'] ?? 0),
+                    'name' => $name,
+                    'display_name' => self::formatRoleLabel($name),
+                ];
+            },
+            $rows
+        );
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function listPermissions(): array
+    {
+        $stmt = $this->connection->query(
+            'SELECT id, name, label, description FROM permissions ORDER BY label ASC'
+        );
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        return array_map(
+            static function (array $row): array {
+                return [
+                    'id' => (int) ($row['id'] ?? 0),
+                    'name' => (string) ($row['name'] ?? ''),
+                    'label' => $row['label'] ?? $row['name'] ?? '',
+                    'description' => $row['description'] ?? null,
+                ];
+            },
+            $rows
+        );
     }
 
     public function createUser(
@@ -49,6 +86,7 @@ class UserService
         string $password,
         int $roleId,
         bool $active,
+        array $permissions,
         int $actorId
     ): array {
         $fullName = $this->sanitizeFullName($fullName);
@@ -80,6 +118,8 @@ class UserService
         }
 
         $userId = (int) $this->connection->lastInsertId();
+        $synced = $this->syncUserPermissions($userId, $permissions, $actorId);
+
         $user = $this->find($userId);
 
         if (!$user) {
@@ -90,6 +130,7 @@ class UserService
             'user_id' => $actorId,
             'target_user_id' => $userId,
             'message' => 'Usuário criado pelo administrador.',
+            'permissions' => $synced,
         ]);
 
         return $user;
@@ -103,6 +144,7 @@ class UserService
         ?string $password,
         int $roleId,
         bool $active,
+        array $permissions,
         int $actorId
     ): bool {
         $fullName = $this->sanitizeFullName($fullName);
@@ -137,10 +179,13 @@ class UserService
             throw $exception;
         }
 
+        $synced = $this->syncUserPermissions($userId, $permissions, $actorId);
+
         $this->logger->info('admin.user_updated', [
             'user_id' => $actorId,
             'target_user_id' => $userId,
             'message' => 'Dados do usuário atualizados.',
+            'permissions' => $synced,
         ]);
 
         return true;
@@ -175,7 +220,247 @@ class UserService
         $stmt->execute(['id' => $userId]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        return $user ?: null;
+        if (!$user) {
+            return null;
+        }
+
+        $hydrated = $this->hydrateUserPermissions([$user]);
+
+        return $hydrated[0] ?? $user;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function hydrateUserPermissions(array $users): array
+    {
+        if ($users === []) {
+            return [];
+        }
+
+        $userIds = [];
+        foreach ($users as $user) {
+            $userId = (int) ($user['id'] ?? 0);
+            if ($userId > 0) {
+                $userIds[$userId] = $userId;
+            }
+        }
+
+        if ($userIds === []) {
+            foreach ($users as &$user) {
+                $user['permissions'] = [];
+                $user['permission_names'] = [];
+            }
+            unset($user);
+
+            return $users;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($userIds), '?'));
+        $stmt = $this->connection->prepare(
+            "SELECT up.user_id, p.name, p.label
+             FROM user_permissions up
+             INNER JOIN permissions p ON p.id = up.permission_id
+             WHERE up.user_id IN ({$placeholders})
+             ORDER BY p.label ASC"
+        );
+        $stmt->execute(array_values($userIds));
+
+        $grouped = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $targetId = (int) ($row['user_id'] ?? 0);
+            if ($targetId <= 0) {
+                continue;
+            }
+            $grouped[$targetId][] = [
+                'name' => (string) ($row['name'] ?? ''),
+                'label' => $row['label'] ?? $row['name'] ?? '',
+            ];
+        }
+
+        foreach ($users as &$user) {
+            $userId = (int) ($user['id'] ?? 0);
+            $permissions = array_values($grouped[$userId] ?? []);
+            $user['permissions'] = $permissions;
+            $user['permission_names'] = array_map(
+                static fn (array $permission): string => (string) ($permission['name'] ?? ''),
+                $permissions
+            );
+        }
+        unset($user);
+
+        return $users;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function syncUserPermissions(int $userId, array $permissions, int $actorId): array
+    {
+        $normalized = $this->normalizePermissionNames($permissions);
+        $map = $this->ensurePermissionRecords($normalized);
+
+        $permissionIds = [];
+        foreach ($normalized as $name) {
+            if (isset($map[$name])) {
+                $permissionIds[] = $map[$name];
+            }
+        }
+
+        $this->connection->beginTransaction();
+
+        try {
+            if ($permissionIds === []) {
+                $delete = $this->connection->prepare('DELETE FROM user_permissions WHERE user_id = :user_id');
+                $delete->execute(['user_id' => $userId]);
+            } else {
+                $placeholder = implode(',', array_fill(0, count($permissionIds), '?'));
+                $delete = $this->connection->prepare(
+                    "DELETE FROM user_permissions WHERE user_id = ? AND permission_id NOT IN ({$placeholder})"
+                );
+                $delete->execute(array_merge([$userId], $permissionIds));
+
+                $insert = $this->connection->prepare(
+                    'INSERT INTO user_permissions (user_id, permission_id, granted_by)
+                     VALUES (:user_id, :permission_id, :granted_by)
+                     ON DUPLICATE KEY UPDATE granted_by = VALUES(granted_by), granted_at = CURRENT_TIMESTAMP'
+                );
+
+                foreach ($permissionIds as $permissionId) {
+                    $insert->execute([
+                        'user_id' => $userId,
+                        'permission_id' => $permissionId,
+                        'granted_by' => $actorId ?: null,
+                    ]);
+                }
+            }
+
+            $this->connection->commit();
+        } catch (PDOException $exception) {
+            $this->connection->rollBack();
+            throw $exception;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function ensurePermissionRecords(array $permissionNames): array
+    {
+        if ($permissionNames === []) {
+            return [];
+        }
+
+        $map = $this->fetchPermissionMap($permissionNames);
+
+        foreach ($permissionNames as $name) {
+            if (isset($map[$name])) {
+                continue;
+            }
+
+            $label = $this->derivePermissionLabel($name);
+
+            $stmt = $this->connection->prepare(
+                'INSERT INTO permissions (name, label, description) VALUES (:name, :label, :description)'
+            );
+            $stmt->execute([
+                'name' => $name,
+                'label' => $label,
+                'description' => 'Permissão configurada manualmente.',
+            ]);
+
+            $map[$name] = (int) $this->connection->lastInsertId();
+        }
+
+        return $map;
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function fetchPermissionMap(array $names): array
+    {
+        if ($names === []) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($names), '?'));
+        $stmt = $this->connection->prepare(
+            "SELECT id, name FROM permissions WHERE name IN ({$placeholders})"
+        );
+        $stmt->execute($names);
+
+        $map = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            if (!isset($row['name'], $row['id'])) {
+                continue;
+            }
+            $map[(string) $row['name']] = (int) $row['id'];
+        }
+
+        return $map;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function normalizePermissionNames(array $permissions): array
+    {
+        $normalized = [];
+
+        foreach ($permissions as $permission) {
+            $slug = $this->normalizePermissionName((string) $permission);
+            if ($slug === null) {
+                continue;
+            }
+            $normalized[$slug] = $slug;
+        }
+
+        return array_values($normalized);
+    }
+
+    private function normalizePermissionName(string $permission): ?string
+    {
+        $trimmed = trim($permission);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        $lower = strtolower($trimmed);
+        $slug = preg_replace('/[^a-z0-9\.\-_]+/', '.', $lower) ?? '';
+        $slug = trim($slug, '.-_');
+
+        return $slug === '' ? null : $slug;
+    }
+
+    private function derivePermissionLabel(string $permission): string
+    {
+        $parts = preg_split('/[\.\-_]+/', $permission) ?: [];
+        $parts = array_filter($parts, static fn (string $part): bool => $part !== '');
+
+        if ($parts === []) {
+            return $permission;
+        }
+
+        $formatted = array_map(
+            static fn (string $part): string => mb_convert_case($part, MB_CASE_TITLE, 'UTF-8'),
+            $parts
+        );
+
+        return implode(' · ', $formatted);
+    }
+
+    private static function formatRoleLabel(string $name): string
+    {
+        return match ($name) {
+            'admin' => 'Administrador',
+            'agent' => 'Atendente',
+            'dev' => 'Desenvolvedor',
+            'supervisor' => 'Supervisor',
+            default => ucfirst($name),
+        };
     }
 
     private function sanitizeFullName(string $name): string

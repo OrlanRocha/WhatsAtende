@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Support\DatabaseBootstrapper;
 use DateTimeImmutable;
 use PDO;
 use PDOException;
@@ -105,6 +106,8 @@ class AuthService
         if ($fullName === '' || $normalizedEmail === '' || strlen($cpf) !== 11) {
             throw new RuntimeException('Dados inválidos para cadastro de usuário.');
         }
+
+        DatabaseBootstrapper::ensure($this->connection);
 
         $roleId ??= $this->resolveRoleId('agent');
         $passwordHash = password_hash($password, PASSWORD_DEFAULT);
@@ -308,7 +311,14 @@ class AuthService
         $roleId = $stmt->fetchColumn();
 
         if (!$roleId) {
-            throw new \RuntimeException('Role not configured: ' . $roleName);
+            DatabaseBootstrapper::ensure($this->connection);
+
+            $stmt->execute(['name' => $roleName]);
+            $roleId = $stmt->fetchColumn();
+
+            if (!$roleId) {
+                throw new \RuntimeException('Role not configured: ' . $roleName);
+            }
         }
 
         return (int) $roleId;
@@ -327,6 +337,24 @@ class AuthService
             'cpf' => $user['cpf'],
             'role_id' => (int) $user['role_id'],
             'role' => $user['role_name'] ?? null,
+            'permissions' => $this->getUserPermissions((int) $user['id']),
         ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function getUserPermissions(int $userId): array
+    {
+        $stmt = $this->connection->prepare(
+            'SELECT p.name FROM user_permissions up '
+            . 'INNER JOIN permissions p ON p.id = up.permission_id '
+            . 'WHERE up.user_id = :user_id ORDER BY p.name ASC'
+        );
+        $stmt->execute(['user_id' => $userId]);
+
+        $permissions = $stmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
+
+        return array_values(array_map(static fn ($value): string => (string) $value, $permissions));
     }
 }

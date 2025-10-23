@@ -14,7 +14,7 @@ class TicketController
 
     public function index(): void
     {
-        require_role('admin');
+        require_role('admin', 'dev');
 
         $status = filter_input(INPUT_GET, 'status', FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: null;
         $tickets = $this->ticketService->listTickets($status);
