@@ -32,15 +32,32 @@ final class DatabaseBootstrapper
 
     private static function ensureRoles(PDO $connection): void
     {
-        $roles = ['admin', 'agent', 'supervisor', 'dev'];
+        $roles = [
+            1 => 'admin',
+            2 => 'agent',
+            3 => 'supervisor',
+            4 => 'dev',
+        ];
 
         $statement = $connection->prepare(
-            'INSERT INTO roles (name) VALUES (:name) '
+            'INSERT INTO roles (id, name) VALUES (:id, :name) '
             . 'ON DUPLICATE KEY UPDATE name = VALUES(name)'
         );
 
-        foreach ($roles as $role) {
-            $statement->execute(['name' => $role]);
+        foreach ($roles as $id => $role) {
+            $statement->execute([
+                'id' => $id,
+                'name' => $role,
+            ]);
+        }
+
+        $maxId = $connection->query('SELECT MAX(id) FROM roles')->fetchColumn();
+        $nextId = max((int) $maxId + 1, count($roles) + 1);
+
+        try {
+            $connection->exec('ALTER TABLE roles AUTO_INCREMENT = ' . $nextId);
+        } catch (PDOException) {
+            // Ignored: the table might not support altering auto-increment in this context.
         }
     }
 
