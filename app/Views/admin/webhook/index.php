@@ -135,7 +135,7 @@ $mode = $settings['integration_mode'] ?? 'webhook';
     </div>
 </div>
 <script type="module">
-import { initIntegrationForm } from '/js/modules/integration.js';
+import { initIntegrationForm } from <?= json_encode(route_path('/js/modules/integration.js')) ?>;
 initIntegrationForm('#integrationForm');
 </script>
 <?php include base_path('app/Views/partials/layout-end.php'); ?>

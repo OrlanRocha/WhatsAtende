@@ -36,7 +36,7 @@ include base_path('app/Views/partials/layout-auth-start.php');
                     <div class="alert alert-danger shadow-sm" role="alert"><?= htmlspecialchars($error) ?></div>
                 <?php endif; ?>
             </div>
-            <form method="POST" action="/reset-password" class="vstack gap-3" data-ajax data-success-message="Senha redefinida com sucesso." data-success-redirect="/login">
+            <form method="POST" action="<?= htmlspecialchars(route_path('/reset-password'), ENT_QUOTES) ?>" class="vstack gap-3" data-ajax data-success-message="Senha redefinida com sucesso." data-success-redirect="<?= htmlspecialchars(route_path('/login'), ENT_QUOTES) ?>">
                 <input type="hidden" name="token" value="<?= htmlspecialchars($token) ?>">
                 <div>
                     <label for="password" class="form-label">Nova senha</label>
@@ -51,7 +51,7 @@ include base_path('app/Views/partials/layout-auth-start.php');
                 </button>
             </form>
             <div class="auth-links">
-                <a href="/login" class="link-secondary">Voltar ao login</a>
+                <a href="<?= htmlspecialchars(route_path('/login'), ENT_QUOTES) ?>" class="link-secondary">Voltar ao login</a>
             </div>
         </div>
     </section>

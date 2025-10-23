@@ -11,6 +11,38 @@ $host = $_SERVER['HTTP_HOST'] ?? '';
 $secure = (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off')
     || (isset($_SERVER['SERVER_PORT']) && (int) $_SERVER['SERVER_PORT'] === 443);
 
+$scheme = $secure ? 'https' : 'http';
+$origin = $host !== '' ? $scheme . '://' . $host : '';
+
+$scriptName = $_SERVER['SCRIPT_NAME'] ?? '';
+$scriptDir = '';
+if ($scriptName !== '') {
+    $dir = str_replace('\\', '/', dirname($scriptName));
+    if ($dir !== '/' && $dir !== '.' && $dir !== '\\') {
+        $scriptDir = '/' . ltrim($dir, '/');
+    }
+}
+
+$appUrl = (string) (env('APP_URL') ?? '');
+if ($appUrl !== '') {
+    $parsed = parse_url($appUrl);
+    if (is_array($parsed)) {
+        $appScheme = $parsed['scheme'] ?? null;
+        $appHost = $parsed['host'] ?? null;
+        if ($appScheme && $appHost) {
+            $appPort = isset($parsed['port']) ? ':' . $parsed['port'] : '';
+            $origin = sprintf('%s://%s%s', $appScheme, $appHost, $appPort);
+        }
+        if (!empty($parsed['path'])) {
+            $scriptDir = '/' . ltrim($parsed['path'], '/');
+        }
+    }
+}
+
+$basePath = $scriptDir === '/' ? '' : rtrim($scriptDir, '/');
+$GLOBALS['app_base_origin'] = rtrim($origin, '/');
+$GLOBALS['app_base_path'] = $basePath;
+
 $cookieDomain = '';
 if ($host !== '') {
     $hostWithoutPort = explode(':', $host)[0] ?? '';

@@ -106,8 +106,8 @@ include base_path('app/Views/partials/topbar.php');
 </div>
 
 <script type="module">
-import { initTemplateModal, refreshTemplateTable } from '/js/modules/templates.js';
+import { initTemplateModal, refreshTemplateTable } from <?= json_encode(route_path('/js/modules/templates.js')) ?>;
 initTemplateModal('#templateModal', '#templateForm');
-window.addEventListener('templates:refresh', () => refreshTemplateTable('#templates-table', '/admin/templates'));
+window.addEventListener('templates:refresh', () => refreshTemplateTable('#templates-table', <?= json_encode(route_path('/admin/templates')) ?>));
 </script>
 <?php include base_path('app/Views/partials/layout-end.php'); ?>

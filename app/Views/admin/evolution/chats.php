@@ -79,7 +79,7 @@ include base_path('app/Views/partials/topbar.php');
     </div>
 </div>
 <script type="module">
-import { initEvolutionChats } from '/js/modules/evolution-chats.js';
-initEvolutionChats('#evolution-chats-page', '/admin/evolution/chats');
+import { initEvolutionChats } from <?= json_encode(route_path('/js/modules/evolution-chats.js')) ?>;
+initEvolutionChats('#evolution-chats-page', <?= json_encode(route_path('/admin/evolution/chats')) ?>);
 </script>
 <?php include base_path('app/Views/partials/layout-end.php'); ?>

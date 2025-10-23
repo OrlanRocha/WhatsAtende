@@ -55,7 +55,7 @@ include base_path('app/Views/partials/topbar.php');
                             <td><?= !empty($ticket['closed_at']) ? htmlspecialchars(date('d/m/Y H:i', strtotime($ticket['closed_at']))) : '—' ?></td>
                             <td><span class="badge bg-info-subtle text-info text-capitalize fw-semibold"><?= htmlspecialchars((string) ($ticket['priority'] ?? 'normal')) ?></span></td>
                             <td class="text-end">
-                                <a href="/tickets/<?= urlencode((string) ($ticket['id'] ?? '')) ?>" class="btn btn-sm btn-outline-primary"><i class="bi bi-chat-dots"></i> Abrir chat</a>
+                                <a href="<?= htmlspecialchars(route_path('/tickets/' . rawurlencode((string) ($ticket['id'] ?? ''))), ENT_QUOTES) ?>" class="btn btn-sm btn-outline-primary"><i class="bi bi-chat-dots"></i> Abrir chat</a>
                             </td>
                         </tr>
                     <?php endforeach; ?>
@@ -66,7 +66,7 @@ include base_path('app/Views/partials/topbar.php');
     </div>
 </div>
 <script type="module">
-import { initTicketList } from '/js/modules/tickets.js';
-initTicketList('#tickets-page', '/admin/tickets');
+import { initTicketList } from <?= json_encode(route_path('/js/modules/tickets.js')) ?>;
+initTicketList('#tickets-page', <?= json_encode(route_path('/admin/tickets')) ?>);
 </script>
 <?php include base_path('app/Views/partials/layout-end.php'); ?>

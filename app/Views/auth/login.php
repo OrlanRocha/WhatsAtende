@@ -34,7 +34,7 @@ include base_path('app/Views/partials/layout-auth-start.php');
                     <div class="alert alert-danger shadow-sm" role="alert"><?= htmlspecialchars($error) ?></div>
                 <?php endif; ?>
             </div>
-            <form method="POST" action="/login" class="vstack gap-3" data-ajax data-success-redirect="/tickets" data-success-message="Autenticado com sucesso.">
+            <form method="POST" action="<?= htmlspecialchars(route_path('/login'), ENT_QUOTES) ?>" class="vstack gap-3" data-ajax data-success-redirect="<?= htmlspecialchars(route_path('/tickets'), ENT_QUOTES) ?>" data-success-message="Autenticado com sucesso.">
                 <div>
                     <label for="email" class="form-label">E-mail</label>
                     <input type="email" class="form-control form-control-lg" id="email" name="email" required autofocus autocomplete="email">
@@ -48,8 +48,8 @@ include base_path('app/Views/partials/layout-auth-start.php');
                 </button>
             </form>
             <div class="auth-links">
-                <a href="/forgot-password" class="link-secondary">Esqueceu a senha?</a>
-                <a href="/register" class="link-secondary">Criar uma conta</a>
+                <a href="<?= htmlspecialchars(route_path('/forgot-password'), ENT_QUOTES) ?>" class="link-secondary">Esqueceu a senha?</a>
+                <a href="<?= htmlspecialchars(route_path('/register'), ENT_QUOTES) ?>" class="link-secondary">Criar uma conta</a>
             </div>
         </div>
     </section>

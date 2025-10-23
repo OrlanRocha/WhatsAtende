@@ -35,7 +35,7 @@ include base_path('app/Views/partials/layout-auth-start.php');
                     </ul>
                 </div>
             <?php endif; ?>
-            <form method="POST" action="/register" class="row g-3" data-ajax data-success-redirect="/tickets" data-success-message="Cadastro realizado com sucesso.">
+            <form method="POST" action="<?= htmlspecialchars(route_path('/register'), ENT_QUOTES) ?>" class="row g-3" data-ajax data-success-redirect="<?= htmlspecialchars(route_path('/tickets'), ENT_QUOTES) ?>" data-success-message="Cadastro realizado com sucesso.">
                 <div class="col-12">
                     <label for="full_name" class="form-label">Nome completo</label>
                     <input type="text" class="form-control form-control-lg" id="full_name" name="full_name" required value="<?= htmlspecialchars($old['full_name'] ?? '') ?>" autocomplete="name">
@@ -63,7 +63,7 @@ include base_path('app/Views/partials/layout-auth-start.php');
                 </div>
             </form>
             <div class="auth-links">
-                <a href="/login" class="link-secondary">Já possui acesso? Entre aqui</a>
+                <a href="<?= htmlspecialchars(route_path('/login'), ENT_QUOTES) ?>" class="link-secondary">Já possui acesso? Entre aqui</a>
             </div>
         </div>
     </section>

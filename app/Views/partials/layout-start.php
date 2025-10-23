@@ -31,7 +31,12 @@ $themeStorageKey = 'whats-theme-preference';
     <link href="https://cdn.datatables.net/v/bs5/dt-2.0.3/datatables.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/@sweetalert2/theme-bootstrap-4@5.0.12/bootstrap-4.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.css" rel="stylesheet" integrity="sha512-vKMx8UnXk60zUwyUnUPM3HbQo8QfmNx7+ltw8Pm5zLusl1XIfwcxo8DbWCqMGKaWeNxWA8yrx5v3SaVpMvR3CA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
-    <link href="/css/theme.css" rel="stylesheet">
+    <link href="<?= htmlspecialchars(asset('css/theme.css'), ENT_QUOTES) ?>" rel="stylesheet">
+    <script>
+        window.__APP_BASE_PATH = <?= json_encode(rtrim(route_path('/'), '/')) ?>;
+        window.__APP_BASE_ORIGIN = <?= json_encode(app_base_origin()) ?>;
+        window.__APP_BASE_URL = <?= json_encode(rtrim(url('/'), '/')) ?>;
+    </script>
 </head>
 <body class="app-body" data-theme="light">
 <div class="app-shell" data-app-shell>

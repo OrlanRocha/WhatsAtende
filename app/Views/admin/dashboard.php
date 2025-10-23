@@ -167,7 +167,7 @@ include base_path('app/Views/partials/topbar.php');
     </div>
 </div>
 <script type="module">
-import { initDashboard } from '/js/modules/dashboard.js';
+import { initDashboard } from <?= json_encode(route_path('/js/modules/dashboard.js')) ?>;
 initDashboard('#dashboard');
 </script>
 <?php include base_path('app/Views/partials/layout-end.php'); ?>

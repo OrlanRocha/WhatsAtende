@@ -171,7 +171,7 @@ class TicketController
         if (is_ajax()) {
             json_response([
                 'message' => 'Chamado atribuído com sucesso.',
-                'redirect' => '/tickets/' . $ticketId,
+                'redirect' => route_path('/tickets/' . $ticketId),
             ]);
         }
 
@@ -223,7 +223,7 @@ class TicketController
         json_response([
             'message' => 'Conversa iniciada com sucesso.',
             'ticket_id' => $ticketId,
-            'redirect' => '/tickets/' . $ticketId,
+            'redirect' => route_path('/tickets/' . $ticketId),
         ]);
     }
 
@@ -447,7 +447,7 @@ class TicketController
         if (is_ajax()) {
             json_response([
                 'message' => 'Chamado finalizado com sucesso.',
-                'redirect' => '/tickets',
+                'redirect' => route_path('/tickets'),
             ]);
         }
 

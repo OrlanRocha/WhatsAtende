@@ -28,7 +28,7 @@ class AuthController
     {
         if (auth()) {
             if (is_ajax()) {
-                json_response(['redirect' => '/tickets']);
+                json_response(['redirect' => route_path('/tickets')]);
             }
             redirect('/tickets');
         }
@@ -57,7 +57,7 @@ class AuthController
         if (is_ajax()) {
             json_response([
                 'message' => 'Bem-vindo de volta, ' . $user['full_name'] . '!',
-                'redirect' => '/tickets',
+                'redirect' => route_path('/tickets'),
             ]);
         }
 
@@ -72,7 +72,7 @@ class AuthController
         if (is_ajax()) {
             json_response([
                 'message' => 'Sessão encerrada com sucesso.',
-                'redirect' => '/login',
+                'redirect' => route_path('/login'),
             ]);
         }
 
@@ -139,7 +139,7 @@ class AuthController
         if (is_ajax()) {
             json_response([
                 'message' => 'Cadastro realizado com sucesso.',
-                'redirect' => '/tickets',
+                'redirect' => route_path('/tickets'),
             ]);
         }
 
@@ -224,7 +224,7 @@ class AuthController
         if (is_ajax()) {
             json_response([
                 'message' => 'Senha redefinida com sucesso. Faça login novamente.',
-                'redirect' => '/login',
+                'redirect' => route_path('/login'),
             ]);
         }
 

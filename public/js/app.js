@@ -8,6 +8,166 @@ let commandInput;
 let commandResults;
 let liveCommandList = [];
 let lastKey = null;
+const APP_BASE_PATH = window.__APP_BASE_PATH || '';
+const APP_BASE_ORIGIN = window.__APP_BASE_ORIGIN || window.location.origin;
+const APP_BASE_URL = window.__APP_BASE_URL || `${APP_BASE_ORIGIN}${APP_BASE_PATH || ''}`;
+
+function isExternalUrl(value) {
+    if (typeof value !== 'string') {
+        return false;
+    }
+    const lower = value.toLowerCase();
+    return lower.startsWith('http://')
+        || lower.startsWith('https://')
+        || lower.startsWith('mailto:')
+        || lower.startsWith('tel:')
+        || lower.startsWith('data:')
+        || lower.startsWith('javascript:');
+}
+
+function buildPath(base, segment) {
+    let normalizedBase = typeof base === 'string' ? base.trim() : '';
+    let normalizedSegment = typeof segment === 'string' ? segment.trim() : '';
+
+    if (normalizedBase === '/' || normalizedBase === '') {
+        normalizedBase = '';
+    } else {
+        normalizedBase = normalizedBase.replace(/\/+$/g, '');
+        if (!normalizedBase.startsWith('/')) {
+            normalizedBase = `/${normalizedBase}`;
+        }
+    }
+
+    if (normalizedSegment.startsWith('/')) {
+        normalizedSegment = normalizedSegment.replace(/^\/+/, '');
+    }
+
+    if (normalizedSegment === '') {
+        return normalizedBase === '' ? '/' : normalizedBase;
+    }
+
+    const joined = normalizedBase === ''
+        ? `/${normalizedSegment}`
+        : `${normalizedBase}/${normalizedSegment}`;
+
+    return joined.replace(/\/{2,}/g, '/');
+}
+
+function joinUrl(origin, path) {
+    const normalizedOrigin = typeof origin === 'string' ? origin.replace(/\/+$/g, '') : '';
+
+    if (typeof path !== 'string' || path === '') {
+        return normalizedOrigin || origin || '';
+    }
+
+    if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('//')) {
+        return path;
+    }
+
+    if (path.startsWith('/')) {
+        return `${normalizedOrigin}${path}`;
+    }
+
+    if (normalizedOrigin === '') {
+        return `/${path}`.replace(/\/{2,}/g, '/');
+    }
+
+    return `${normalizedOrigin}/${path}`.replace(/\/{2,}/g, '/');
+}
+
+function appPath(value) {
+    if (typeof value !== 'string') {
+        return value;
+    }
+
+    const trimmed = value.trim();
+
+    if (trimmed === '') {
+        return buildPath(APP_BASE_PATH, '');
+    }
+
+    if (trimmed === '#') {
+        return trimmed;
+    }
+
+    if (isExternalUrl(trimmed) || trimmed.startsWith('//')) {
+        return trimmed;
+    }
+
+    if (trimmed.startsWith('?')) {
+        const current = window.location.pathname || buildPath(APP_BASE_PATH, '');
+        return `${current}${trimmed}`;
+    }
+
+    if (trimmed.startsWith('#')) {
+        return trimmed;
+    }
+
+    if (APP_BASE_PATH && trimmed.startsWith(`${APP_BASE_PATH}/`)) {
+        return trimmed.replace(/\/{2,}/g, '/');
+    }
+
+    if (APP_BASE_PATH && trimmed === APP_BASE_PATH) {
+        return APP_BASE_PATH;
+    }
+
+    if (trimmed.startsWith('/')) {
+        return buildPath(APP_BASE_PATH, trimmed.slice(1));
+    }
+
+    return buildPath(APP_BASE_PATH, trimmed);
+}
+
+function resolveUrl(value) {
+    if (typeof value !== 'string' || value.trim() === '') {
+        return APP_BASE_URL || window.location.href;
+    }
+
+    if (isExternalUrl(value) || value.startsWith('//')) {
+        return value;
+    }
+
+    const normalized = appPath(value);
+
+    if (typeof normalized !== 'string') {
+        return normalized;
+    }
+
+    if (normalized.startsWith('http://') || normalized.startsWith('https://') || normalized.startsWith('//')) {
+        return normalized;
+    }
+
+    if (normalized.startsWith('#')) {
+        return normalized;
+    }
+
+    if (normalized.startsWith('?')) {
+        return `${APP_BASE_ORIGIN}${normalized}`;
+    }
+
+    return joinUrl(APP_BASE_ORIGIN, normalized);
+}
+
+function normalizeDomLocations() {
+    document.querySelectorAll('a[href]').forEach((anchor) => {
+        const href = anchor.getAttribute('href');
+        if (!href || href === '#') {
+            return;
+        }
+        const normalized = appPath(href);
+        if (typeof normalized === 'string' && normalized !== href) {
+            anchor.setAttribute('href', normalized);
+        }
+    });
+
+    document.querySelectorAll('form[action]').forEach((form) => {
+        const action = form.getAttribute('action');
+        const normalized = appPath(action || '');
+        if (typeof normalized === 'string' && normalized !== action) {
+            form.setAttribute('action', normalized);
+        }
+    });
+}
 
 function getPreferredTheme() {
     const stored = localStorage.getItem(THEME_KEY);
@@ -98,7 +258,8 @@ export async function request(url, options = {}) {
         config.body = JSON.stringify(config.body);
     }
 
-    const response = await fetch(url, config);
+    const endpoint = resolveUrl(url);
+    const response = await fetch(endpoint, config);
     const contentType = response.headers.get('Content-Type') || '';
     let data = null;
     if (contentType.includes('application/json')) {
@@ -242,8 +403,12 @@ async function handleAjaxSubmit(event) {
             });
         }
         const method = (form.dataset.method || form.method || 'POST').toUpperCase();
-        const url = form.getAttribute('action') || window.location.href;
-        const data = await request(url, {
+        const action = form.getAttribute('action') || window.location.href;
+        const normalizedAction = appPath(action);
+        if (typeof normalizedAction === 'string' && normalizedAction !== form.getAttribute('action')) {
+            form.setAttribute('action', normalizedAction);
+        }
+        const data = await request(action, {
             method,
             body,
         });
@@ -496,13 +661,13 @@ function initKeyboardShortcuts() {
 
         if (modifier && event.key.toLowerCase() === 'l') {
             event.preventDefault();
-            window.location.assign('/admin/logs');
+            window.location.assign(resolveUrl('/admin/logs'));
             return;
         }
 
         if (modifier && event.key.toLowerCase() === 't') {
             event.preventDefault();
-            window.location.assign('/tickets');
+            window.location.assign(resolveUrl('/tickets'));
             return;
         }
 
@@ -514,11 +679,11 @@ function initKeyboardShortcuts() {
             }
             if (lastKey === 'g' && event.key.toLowerCase() === 't') {
                 event.preventDefault();
-                window.location.assign('/tickets');
+                window.location.assign(resolveUrl('/tickets'));
                 lastKey = null;
             } else if (lastKey === 'g' && event.key.toLowerCase() === 'l') {
                 event.preventDefault();
-                window.location.assign('/admin/logs');
+                window.location.assign(resolveUrl('/admin/logs'));
                 lastKey = null;
             }
         }
@@ -638,6 +803,7 @@ function initAutoRefresh() {
     });
 }
 
+normalizeDomLocations();
 setupTheme();
 setupToastr();
 setupAjaxForms();

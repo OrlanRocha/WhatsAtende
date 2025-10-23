@@ -8,6 +8,64 @@ function base_path(string $path = ''): string
     return $path === '' ? $base : $base . DIRECTORY_SEPARATOR . ltrim($path, DIRECTORY_SEPARATOR);
 }
 
+function app_base_origin(): string
+{
+    return $GLOBALS['app_base_origin'] ?? '';
+}
+
+function app_base_path(): string
+{
+    return $GLOBALS['app_base_path'] ?? '';
+}
+
+function route_path(string $path = ''): string
+{
+    $basePath = app_base_path();
+    $basePath = $basePath === '/' ? '' : $basePath;
+
+    if ($path === '' || $path === '/') {
+        return $basePath === '' ? '/' : rtrim($basePath, '/') . '/';
+    }
+
+    if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://') || str_starts_with($path, '//')) {
+        return $path;
+    }
+
+    if ($basePath !== '' && (str_starts_with($path, $basePath) || str_starts_with('/' . ltrim($path, '/'), $basePath . '/'))) {
+        $normalizedExisting = str_starts_with($path, '/') ? $path : '/' . ltrim($path, '/');
+        return $normalizedExisting;
+    }
+
+    $normalized = '/' . ltrim($path, '/');
+
+    if ($basePath === '' || $basePath === '/') {
+        return $normalized;
+    }
+
+    return rtrim($basePath, '/') . $normalized;
+}
+
+function url(string $path = ''): string
+{
+    if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://') || str_starts_with($path, '//')) {
+        return $path;
+    }
+
+    $origin = rtrim(app_base_origin(), '/');
+    $route = route_path($path);
+
+    if ($origin === '') {
+        return $route;
+    }
+
+    return $route === '' ? $origin : $origin . $route;
+}
+
+function asset(string $path): string
+{
+    return url('/' . ltrim($path, '/'));
+}
+
 function load_env_file(?string $path = null, bool $overwrite = false): void
 {
     $path ??= base_path('.env');
@@ -128,7 +186,8 @@ function view(string $name, array $data = []): void
 function redirect(string $path, int $status = 302): void
 {
     http_response_code($status);
-    header('Location: ' . $path);
+    $location = url($path);
+    header('Location: ' . $location);
     exit;
 }
 

@@ -28,7 +28,7 @@ include base_path('app/Views/partials/layout-auth-start.php');
             <?php if (!empty($status)): ?>
                 <div class="alert alert-info shadow-sm" role="alert"><?= htmlspecialchars($status) ?></div>
             <?php endif; ?>
-            <form method="POST" action="/forgot-password" class="vstack gap-3" data-ajax data-success-message="Se o e-mail existir, enviaremos instruções.">
+            <form method="POST" action="<?= htmlspecialchars(route_path('/forgot-password'), ENT_QUOTES) ?>" class="vstack gap-3" data-ajax data-success-message="Se o e-mail existir, enviaremos instruções.">
                 <div>
                     <label for="email" class="form-label">E-mail</label>
                     <input type="email" class="form-control form-control-lg" id="email" name="email" required autocomplete="email">
@@ -38,8 +38,8 @@ include base_path('app/Views/partials/layout-auth-start.php');
                 </button>
             </form>
             <div class="auth-links">
-                <a href="/login" class="link-secondary">Voltar ao login</a>
-                <a href="/register" class="link-secondary">Criar conta</a>
+                <a href="<?= htmlspecialchars(route_path('/login'), ENT_QUOTES) ?>" class="link-secondary">Voltar ao login</a>
+                <a href="<?= htmlspecialchars(route_path('/register'), ENT_QUOTES) ?>" class="link-secondary">Criar conta</a>
             </div>
         </div>
     </section>

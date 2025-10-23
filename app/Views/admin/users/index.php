@@ -143,8 +143,8 @@ include base_path('app/Views/partials/topbar.php');
 </div>
 
 <script type="module">
-import { initUserModal, refreshUserTable } from '/js/modules/users.js';
+import { initUserModal, refreshUserTable } from <?= json_encode(route_path('/js/modules/users.js')) ?>;
 initUserModal('#userModal', '#userForm');
-window.addEventListener('users:refresh', () => refreshUserTable('#users-table', '/admin/users'));
+window.addEventListener('users:refresh', () => refreshUserTable('#users-table', <?= json_encode(route_path('/admin/users')) ?>));
 </script>
 <?php include base_path('app/Views/partials/layout-end.php'); ?>

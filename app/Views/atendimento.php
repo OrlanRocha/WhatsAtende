@@ -227,7 +227,7 @@ include base_path('app/Views/partials/topbar.php');
     </aside>
 </div>
 <script type="module">
-import { initChat } from '/js/modules/chat.js';
+import { initChat } from <?= json_encode(route_path('/js/modules/chat.js')) ?>;
 initChat('#ticket-workspace');
 </script>
 <?php include base_path('app/Views/partials/layout-end.php'); ?>

@@ -29,7 +29,12 @@ $themeStorageKey = 'whats-theme-preference';
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.css" rel="stylesheet" integrity="sha512-vKMx8UnXk60zUwyUnUPM3HbQo8QfmNx7+ltw8Pm5zLusl1XIfwcxo8DbWCqMGKaWeNxWA8yrx5v3SaVpMvR3CA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
-    <link href="/css/theme.css" rel="stylesheet">
+    <link href="<?= htmlspecialchars(asset('css/theme.css'), ENT_QUOTES) ?>" rel="stylesheet">
+    <script>
+        window.__APP_BASE_PATH = <?= json_encode(rtrim(route_path('/'), '/')) ?>;
+        window.__APP_BASE_ORIGIN = <?= json_encode(app_base_origin()) ?>;
+        window.__APP_BASE_URL = <?= json_encode(rtrim(url('/'), '/')) ?>;
+    </script>
 </head>
 <body class="auth-body" data-theme="light">
 <main class="auth-shell">

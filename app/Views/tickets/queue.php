@@ -2,15 +2,15 @@
 /** @var array<int, array<string, mixed>> $queue */
 /** @var array<string, mixed> $nativeChats */
 $nativeChats = $nativeChats ?? ['enabled' => false, 'chats' => [], 'error' => null];
-$nativeStartEndpoint = $nativeStartEndpoint ?? '/tickets/native/start';
+$nativeStartEndpoint = route_path($nativeStartEndpoint ?? '/tickets/native/start');
 $status = get_flash('auth_status');
 $error = get_flash('auth_error');
 $pageId = ($pageId ?? 'queue-page');
 $queueTitle = $queueTitle ?? 'Fila em tempo real';
 $queueDescription = $queueDescription ?? 'Chamados aguardando atribuição atualizam automaticamente a cada 10 segundos.';
-$queueEndpoint = $queueEndpoint ?? '/tickets';
+$queueEndpoint = route_path($queueEndpoint ?? '/tickets');
 $breadcrumbs = $breadcrumbs ?? [
-    ['label' => 'Painel', 'href' => '/tickets'],
+    ['label' => 'Painel', 'href' => route_path('/tickets')],
     ['label' => $queueTitle],
 ];
 $workspaceTabs = $workspaceTabs ?? [
@@ -67,12 +67,12 @@ include base_path('app/Views/partials/topbar.php');
                 <i class="bi bi-view-stacked"></i><span class="d-none d-lg-inline"> Compactar</span>
             </button>
             <?php if ($showTodayLink ?? false): ?>
-                <a class="btn btn-outline-primary btn-sm" href="/tickets/today">
+                <a class="btn btn-outline-primary btn-sm" href="<?= htmlspecialchars(route_path('/tickets/today'), ENT_QUOTES) ?>">
                     <i class="bi bi-calendar-day"></i> Hoje
                 </a>
             <?php endif; ?>
             <?php if ($showAllLink ?? false): ?>
-                <a class="btn btn-outline-primary btn-sm" href="/tickets">
+                <a class="btn btn-outline-primary btn-sm" href="<?= htmlspecialchars(route_path('/tickets'), ENT_QUOTES) ?>">
                     <i class="bi bi-list-ul"></i> Fila completa
                 </a>
             <?php endif; ?>
@@ -202,7 +202,7 @@ include base_path('app/Views/partials/topbar.php');
     <?php endif; ?>
 </div>
 <script type="module">
-import { initQueue } from '/js/modules/queue.js';
+import { initQueue } from <?= json_encode(route_path('/js/modules/queue.js')) ?>;
 const pageSelector = <?= json_encode('#' . $pageId) ?>;
 const endpoint = <?= json_encode($queueEndpoint) ?>;
 const nativeConfig = <?= json_encode([

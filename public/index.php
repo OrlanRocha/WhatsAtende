@@ -146,6 +146,12 @@ $routes = require base_path('routes/web.php');
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 
+$basePath = app_base_path();
+if ($basePath !== '' && $basePath !== '/' && str_starts_with($uri, $basePath)) {
+    $uri = substr($uri, strlen($basePath));
+    $uri = $uri === '' ? '/' : $uri;
+}
+
 $matched = false;
 
 foreach ($routes as [$httpVerb, $pattern, $handler]) {

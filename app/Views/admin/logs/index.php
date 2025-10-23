@@ -174,7 +174,7 @@ include base_path('app/Views/partials/topbar.php');
     </section>
 </div>
 <script type="module">
-import { initLogViewer } from '/js/modules/logs.js';
-initLogViewer('#logs-page', '/admin/logs');
+import { initLogViewer } from <?= json_encode(route_path('/js/modules/logs.js')) ?>;
+initLogViewer('#logs-page', <?= json_encode(route_path('/admin/logs')) ?>);
 </script>
 <?php include base_path('app/Views/partials/layout-end.php'); ?>

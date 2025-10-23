@@ -8,13 +8,13 @@ $instances = $instances ?? [
 ];
 
 $navItems = [
-    ['href' => '/tickets', 'icon' => 'bi-chat-dots', 'label' => 'Atendimentos'],
-    ['href' => '/tickets/today', 'icon' => 'bi-inboxes', 'label' => 'Fila'],
-    ['href' => '/admin/templates', 'icon' => 'bi-stickies', 'label' => 'Templates', 'roles' => ['admin']],
-    ['href' => '/admin/logs', 'icon' => 'bi-activity', 'label' => 'Logs', 'roles' => ['admin']],
-    ['href' => '/admin/webhook', 'icon' => 'bi-plug', 'label' => 'Webhook', 'roles' => ['admin']],
-    ['href' => '/admin', 'icon' => 'bi-speedometer2', 'label' => 'Configurações', 'roles' => ['admin']],
-    ['href' => '/admin/evolution/chats', 'icon' => 'bi-lightning-charge', 'label' => 'Admin', 'roles' => ['admin']],
+    ['href' => route_path('/tickets'), 'icon' => 'bi-chat-dots', 'label' => 'Atendimentos'],
+    ['href' => route_path('/tickets/today'), 'icon' => 'bi-inboxes', 'label' => 'Fila'],
+    ['href' => route_path('/admin/templates'), 'icon' => 'bi-stickies', 'label' => 'Templates', 'roles' => ['admin']],
+    ['href' => route_path('/admin/logs'), 'icon' => 'bi-activity', 'label' => 'Logs', 'roles' => ['admin']],
+    ['href' => route_path('/admin/webhook'), 'icon' => 'bi-plug', 'label' => 'Webhook', 'roles' => ['admin']],
+    ['href' => route_path('/admin'), 'icon' => 'bi-speedometer2', 'label' => 'Configurações', 'roles' => ['admin']],
+    ['href' => route_path('/admin/evolution/chats'), 'icon' => 'bi-lightning-charge', 'label' => 'Admin', 'roles' => ['admin']],
 ];
 
 $navItems = array_filter($navItems, static function (array $item) use ($user): bool {
@@ -34,7 +34,7 @@ $initial = function_exists('mb_substr') ? mb_strtoupper(mb_substr($userName, 0, 
         <button class="btn btn-icon btn-outline-secondary app-sidebar__collapse" type="button" data-sidebar-toggle aria-label="Recolher menu">
             <i class="bi bi-layout-sidebar-inset"></i>
         </button>
-        <a class="app-sidebar__logo" href="/tickets">
+        <a class="app-sidebar__logo" href="<?= htmlspecialchars(route_path('/tickets'), ENT_QUOTES) ?>">
             <span class="app-sidebar__logo-mark">WA</span>
             <span class="app-sidebar__logo-text">WhatsAtende</span>
         </a>
@@ -103,7 +103,7 @@ $initial = function_exists('mb_substr') ? mb_strtoupper(mb_substr($userName, 0, 
                     </li>
                     <li><hr class="dropdown-divider"></li>
                     <li>
-                        <form method="POST" action="/logout" data-ajax data-success-redirect="/login">
+                        <form method="POST" action="<?= htmlspecialchars(route_path('/logout'), ENT_QUOTES) ?>" data-ajax data-success-redirect="<?= htmlspecialchars(route_path('/login'), ENT_QUOTES) ?>">
                             <button class="dropdown-item" type="submit">
                                 <i class="bi bi-box-arrow-right"></i> Sair
                             </button>
@@ -119,7 +119,7 @@ $initial = function_exists('mb_substr') ? mb_strtoupper(mb_substr($userName, 0, 
                 <?php foreach ($breadcrumbs as $breadcrumb): ?>
                     <li>
                         <?php if (!empty($breadcrumb['href'])): ?>
-                            <a href="<?= htmlspecialchars((string) $breadcrumb['href']) ?>"><?= htmlspecialchars((string) $breadcrumb['label']) ?></a>
+                            <a href="<?= htmlspecialchars(route_path((string) $breadcrumb['href']), ENT_QUOTES) ?>"><?= htmlspecialchars((string) $breadcrumb['label']) ?></a>
                         <?php else: ?>
                             <span aria-current="page"><?= htmlspecialchars((string) $breadcrumb['label']) ?></span>
                         <?php endif; ?>
