@@ -9,6 +9,27 @@ INSERT INTO roles (id, name) VALUES
     (2, 'agent')
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
+INSERT INTO permissions (
+    id,
+    name,
+    label,
+    description,
+    created_at,
+    updated_at
+) VALUES
+    (1, 'users.manage', 'Gerenciar usuários', 'Permite criar, editar e remover usuários.', NOW(), NOW()),
+    (2, 'permissions.manage', 'Gerenciar permissões', 'Permite ajustar permissões individuais por usuário.', NOW(), NOW()),
+    (3, 'tickets.manage', 'Gerenciar tickets', 'Autoriza atualizar tickets e interações.', NOW(), NOW()),
+    (4, 'tickets.assign', 'Atribuir tickets', 'Permite atribuir e transferir tickets.', NOW(), NOW()),
+    (5, 'templates.manage', 'Gerenciar templates', 'Permite criar e atualizar templates compartilhados.', NOW(), NOW()),
+    (6, 'logs.view', 'Visualizar logs', 'Permite acessar o monitor de logs e o live tail.', NOW(), NOW()),
+    (7, 'webhook.manage', 'Configurar webhook', 'Permite ajustar integrações de webhook e Evolution.', NOW(), NOW()),
+    (8, 'reports.view', 'Visualizar relatórios', 'Permite acessar dashboards e relatórios administrativos.', NOW(), NOW())
+ON DUPLICATE KEY UPDATE
+    label = VALUES(label),
+    description = VALUES(description),
+    updated_at = NOW();
+
 -- Seed administrative and helpdesk users
 INSERT INTO users (
     id,
@@ -29,6 +50,22 @@ ON DUPLICATE KEY UPDATE
     role_id = VALUES(role_id),
     is_active = VALUES(is_active),
     password_hash = VALUES(password_hash);
+
+INSERT INTO user_permissions (
+    user_id,
+    permission_id,
+    granted_by,
+    granted_at
+) VALUES
+    (1, 1, 1, NOW()),
+    (1, 2, 1, NOW()),
+    (1, 3, 1, NOW()),
+    (1, 4, 1, NOW()),
+    (1, 5, 1, NOW()),
+    (1, 8, 1, NOW())
+ON DUPLICATE KEY UPDATE
+    granted_at = VALUES(granted_at),
+    granted_by = VALUES(granted_by);
 
 -- Seed default message templates
 INSERT INTO templates (

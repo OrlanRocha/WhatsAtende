@@ -41,6 +41,7 @@ include base_path('app/Views/partials/topbar.php');
                         <th>Perfil</th>
                         <th>Ativo</th>
                         <th>Atribuídos</th>
+                        <th>Permissões</th>
                         <th class="text-end">Ações</th>
                     </tr>
                     </thead>
@@ -60,6 +61,19 @@ include base_path('app/Views/partials/topbar.php');
                                 <?php endif; ?>
                             </td>
                             <td><?= (int) ($user['assigned_tickets'] ?? 0) ?></td>
+                            <td>
+                                <?php if (!empty($user['permissions'])): ?>
+                                    <div class="d-flex flex-wrap gap-1">
+                                        <?php foreach ($user['permissions'] as $permission): ?>
+                                            <span class="badge rounded-pill text-bg-light border">
+                                                <?= htmlspecialchars((string) ($permission['label'] ?? $permission['name'] ?? '')) ?>
+                                            </span>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php else: ?>
+                                    <span class="text-muted small">—</span>
+                                <?php endif; ?>
+                            </td>
                             <td class="text-end">
                                 <div class="btn-group" role="group">
                                     <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#userModal" data-mode="edit">
@@ -128,6 +142,36 @@ include base_path('app/Views/partials/topbar.php');
                                 <input class="form-check-input" type="checkbox" role="switch" id="user_is_active" name="is_active" value="1" checked>
                                 <label class="form-check-label" for="user_is_active">Usuário ativo</label>
                             </div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Permissões individuais</label>
+                            <div class="d-flex flex-wrap gap-3" data-permissions-list>
+                                <?php foreach ($permissions ?? [] as $permission): ?>
+                                    <?php $permissionValue = (string) ($permission['name'] ?? ''); ?>
+                                    <div class="form-check form-check-inline align-items-start">
+                                        <input
+                                            class="form-check-input"
+                                            type="checkbox"
+                                            value="<?= htmlspecialchars($permissionValue) ?>"
+                                            id="permission-<?= (int) ($permission['id'] ?? 0) ?>"
+                                            name="permissions[]"
+                                            data-permission-checkbox
+                                        >
+                                        <label class="form-check-label" for="permission-<?= (int) ($permission['id'] ?? 0) ?>">
+                                            <span class="fw-semibold d-block"><?= htmlspecialchars((string) ($permission['label'] ?? $permissionValue)) ?></span>
+                                            <?php if (!empty($permission['description'])): ?>
+                                                <small class="text-muted"><?= htmlspecialchars((string) $permission['description']) ?></small>
+                                            <?php endif; ?>
+                                        </label>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                            <small class="text-muted d-block mt-1">Combine permissões específicas além do perfil principal do usuário.</small>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label" for="user_custom_permissions">Permissões personalizadas</label>
+                            <input type="text" class="form-control" id="user_custom_permissions" name="custom_permissions" placeholder="Ex.: reports.export, ai.override">
+                            <small class="text-muted">Separe múltiplas permissões por vírgula, espaço ou quebra de linha.</small>
                         </div>
                     </div>
                 </div>

@@ -337,6 +337,24 @@ class AuthService
             'cpf' => $user['cpf'],
             'role_id' => (int) $user['role_id'],
             'role' => $user['role_name'] ?? null,
+            'permissions' => $this->getUserPermissions((int) $user['id']),
         ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function getUserPermissions(int $userId): array
+    {
+        $stmt = $this->connection->prepare(
+            'SELECT p.name FROM user_permissions up '
+            . 'INNER JOIN permissions p ON p.id = up.permission_id '
+            . 'WHERE up.user_id = :user_id ORDER BY p.name ASC'
+        );
+        $stmt->execute(['user_id' => $userId]);
+
+        $permissions = $stmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
+
+        return array_values(array_map(static fn ($value): string => (string) $value, $permissions));
     }
 }

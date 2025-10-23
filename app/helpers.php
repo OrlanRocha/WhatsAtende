@@ -226,6 +226,35 @@ function has_role(string ...$roles): bool
     return in_array($user->role ?? null, $roles, true);
 }
 
+function has_permission(string ...$permissions): bool
+{
+    $user = auth();
+    if ($user === null) {
+        return false;
+    }
+
+    if (($user->role ?? null) === 'dev') {
+        return true;
+    }
+
+    $userPermissions = [];
+    if (isset($user->permissions) && is_array($user->permissions)) {
+        $userPermissions = $user->permissions;
+    }
+
+    if ($permissions === []) {
+        return true;
+    }
+
+    foreach ($permissions as $permission) {
+        if (in_array($permission, $userPermissions, true)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 function require_role(string ...$roles): object
 {
     $user = require_auth();
@@ -239,6 +268,34 @@ function require_role(string ...$roles): object
     return $user;
 }
 
+function require_permission(string ...$permissions): object
+{
+    $user = require_auth();
+
+    if (($user->role ?? null) === 'dev') {
+        return $user;
+    }
+
+    $userPermissions = [];
+    if (isset($user->permissions) && is_array($user->permissions)) {
+        $userPermissions = $user->permissions;
+    }
+
+    if ($permissions === []) {
+        return $user;
+    }
+
+    foreach ($permissions as $permission) {
+        if (in_array($permission, $userPermissions, true)) {
+            return $user;
+        }
+    }
+
+    http_response_code(403);
+    echo 'Acesso negado.';
+    exit;
+}
+
 function login_user(array $user): void
 {
     $_SESSION['auth_user'] = [
@@ -246,6 +303,12 @@ function login_user(array $user): void
         'full_name' => (string) ($user['full_name'] ?? ''),
         'email' => (string) ($user['email'] ?? ''),
         'role' => $user['role'] ?? null,
+        'permissions' => array_values(
+            array_map(
+                static fn ($permission): string => (string) $permission,
+                is_array($user['permissions'] ?? null) ? $user['permissions'] : []
+            )
+        ),
     ];
 
     session_regenerate_id(true);

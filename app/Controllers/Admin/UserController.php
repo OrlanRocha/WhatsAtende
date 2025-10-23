@@ -26,6 +26,7 @@ class UserController
         view('admin/users/index', [
             'users' => $users,
             'roles' => $this->userService->listRoles(),
+            'permissions' => $this->userService->listPermissions(),
             'status' => get_flash('admin_status'),
             'error' => get_flash('admin_error'),
         ]);
@@ -33,10 +34,11 @@ class UserController
 
     public function create(): void
     {
-        require_role('admin');
+        require_role('admin', 'dev');
 
         view('admin/users/form', [
             'roles' => $this->userService->listRoles(),
+            'permissions' => $this->userService->listPermissions(),
             'errors' => get_flash('user_form_errors') ?? [],
             'old' => get_flash('user_form_old') ?? [],
             'action' => 'create',
@@ -55,6 +57,7 @@ class UserController
         $passwordConfirmation = $_POST['password_confirmation'] ?? '';
         $roleId = (int) ($_POST['role_id'] ?? 0);
         $active = isset($_POST['is_active']) ? (bool) (int) $_POST['is_active'] : true;
+        $permissions = $this->collectPermissionsFromRequest();
 
         $errors = $this->validateUserForm($fullName, $email, $cpf, $password, $passwordConfirmation, true);
 
@@ -69,11 +72,22 @@ class UserController
                 'cpf' => $cpf,
                 'role_id' => $roleId,
                 'is_active' => $active ? 1 : 0,
+                'permissions' => $permissions,
+                'custom_permissions' => $_POST['custom_permissions'] ?? '',
             ], '/admin/users/create', $isAjax);
         }
 
         try {
-            $user = $this->userService->createUser($fullName, $email, $cpf, $password, $roleId, $active, (int) $admin->id);
+            $user = $this->userService->createUser(
+                $fullName,
+                $email,
+                $cpf,
+                $password,
+                $roleId,
+                $active,
+                $permissions,
+                (int) $admin->id
+            );
         } catch (PDOException $exception) {
             $errors[] = 'Não foi possível criar o usuário. Verifique se e-mail ou CPF já estão cadastrados.';
             $this->handleUserFormError($errors, [
@@ -82,6 +96,8 @@ class UserController
                 'cpf' => $cpf,
                 'role_id' => $roleId,
                 'is_active' => $active ? 1 : 0,
+                'permissions' => $permissions,
+                'custom_permissions' => $_POST['custom_permissions'] ?? '',
             ], '/admin/users/create', $isAjax);
         }
 
@@ -109,6 +125,7 @@ class UserController
 
         view('admin/users/form', [
             'roles' => $this->userService->listRoles(),
+            'permissions' => $this->userService->listPermissions(),
             'errors' => get_flash('user_form_errors') ?? [],
             'old' => get_flash('user_form_old') ?? $user,
             'action' => 'edit',
@@ -128,6 +145,7 @@ class UserController
         $passwordConfirmation = $_POST['password_confirmation'] ?? '';
         $roleId = (int) ($_POST['role_id'] ?? 0);
         $active = isset($_POST['is_active']) ? ((int) $_POST['is_active'] === 1) : true;
+        $permissions = $this->collectPermissionsFromRequest();
 
         $errors = $this->validateUserForm($fullName, $email, $cpf, $password, $passwordConfirmation, false);
 
@@ -142,6 +160,8 @@ class UserController
                 'cpf' => $cpf,
                 'role_id' => $roleId,
                 'is_active' => $active,
+                'permissions' => $permissions,
+                'custom_permissions' => $_POST['custom_permissions'] ?? '',
             ], '/admin/users/' . $userId . '/edit', $isAjax);
         }
 
@@ -154,6 +174,7 @@ class UserController
                 $password === '' ? null : $password,
                 $roleId,
                 $active,
+                $permissions,
                 (int) $admin->id
             );
         } catch (PDOException $exception) {
@@ -164,6 +185,8 @@ class UserController
                 'cpf' => $cpf,
                 'role_id' => $roleId,
                 'is_active' => $active,
+                'permissions' => $permissions,
+                'custom_permissions' => $_POST['custom_permissions'] ?? '',
             ], '/admin/users/' . $userId . '/edit', $isAjax);
         }
 
@@ -181,7 +204,7 @@ class UserController
 
     public function destroy(int $userId): void
     {
-        $admin = require_role('admin');
+        $admin = require_role('admin', 'dev');
         $isAjax = is_ajax();
 
         if ((int) $admin->id === $userId) {
@@ -201,6 +224,36 @@ class UserController
 
         set_flash('admin_status', 'Usuário removido com sucesso.');
         redirect('/admin/users');
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function collectPermissionsFromRequest(): array
+    {
+        $permissions = [];
+
+        $selected = $_POST['permissions'] ?? [];
+        if (is_array($selected)) {
+            foreach ($selected as $permission) {
+                if (is_string($permission) && $permission !== '') {
+                    $permissions[] = $permission;
+                }
+            }
+        }
+
+        $custom = $_POST['custom_permissions'] ?? '';
+        if (is_string($custom) && $custom !== '') {
+            $parts = preg_split('/[\s,;\n]+/', $custom) ?: [];
+            foreach ($parts as $part) {
+                $slug = trim((string) $part);
+                if ($slug !== '') {
+                    $permissions[] = $slug;
+                }
+            }
+        }
+
+        return $permissions;
     }
 
     private function validateUserForm(

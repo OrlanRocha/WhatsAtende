@@ -10,6 +10,53 @@ use Throwable;
 
 final class DatabaseBootstrapper
 {
+    private const DEFAULT_PERMISSIONS = [
+        'users.manage' => [
+            'label' => 'Gerenciar usuários',
+            'description' => 'Permite criar, editar e remover usuários.'
+        ],
+        'permissions.manage' => [
+            'label' => 'Gerenciar permissões',
+            'description' => 'Permite ajustar permissões individuais por usuário.'
+        ],
+        'tickets.manage' => [
+            'label' => 'Gerenciar tickets',
+            'description' => 'Autoriza atualizar tickets, SLA e interações.'
+        ],
+        'tickets.assign' => [
+            'label' => 'Atribuir tickets',
+            'description' => 'Permite atribuir, transferir e priorizar tickets.'
+        ],
+        'templates.manage' => [
+            'label' => 'Gerenciar templates',
+            'description' => 'Permite criar e atualizar templates compartilhados.'
+        ],
+        'logs.view' => [
+            'label' => 'Visualizar logs',
+            'description' => 'Permite acessar o monitor de logs e live tail.'
+        ],
+        'webhook.manage' => [
+            'label' => 'Configurar webhook',
+            'description' => 'Permite ajustar integrações do Evolution e webhooks.'
+        ],
+        'reports.view' => [
+            'label' => 'Visualizar relatórios',
+            'description' => 'Permite acessar dashboards, relatórios e insights.'
+        ],
+    ];
+
+    private const ROLE_DEFAULT_PERMISSIONS = [
+        'admin' => [
+            'users.manage',
+            'permissions.manage',
+            'tickets.manage',
+            'tickets.assign',
+            'templates.manage',
+            'reports.view',
+        ],
+        'dev' => ['*'],
+    ];
+
     private static bool $bootstrapped = false;
 
     public static function ensure(PDO $connection): void
@@ -20,12 +67,31 @@ final class DatabaseBootstrapper
 
         try {
             self::ensureRoles($connection);
+            self::ensurePermissions($connection);
             self::ensureAdminAccount($connection);
+            self::ensureRolePermissions($connection);
 
             self::$bootstrapped = true;
         } catch (Throwable $exception) {
             app_logger()->error('database.bootstrap.failed', [
                 'message' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    private static function ensurePermissions(PDO $connection): void
+    {
+        $statement = $connection->prepare(
+            'INSERT INTO permissions (name, label, description)
+             VALUES (:name, :label, :description)
+             ON DUPLICATE KEY UPDATE label = VALUES(label), description = VALUES(description)'
+        );
+
+        foreach (self::DEFAULT_PERMISSIONS as $name => $meta) {
+            $statement->execute([
+                'name' => $name,
+                'label' => $meta['label'],
+                'description' => $meta['description'],
             ]);
         }
     }
@@ -95,6 +161,74 @@ final class DatabaseBootstrapper
             'cpf' => $cpf,
             'password_hash' => $passwordHash,
         ]);
+    }
+
+    private static function ensureRolePermissions(PDO $connection): void
+    {
+        foreach (self::ROLE_DEFAULT_PERMISSIONS as $roleName => $permissionList) {
+            $roleId = self::lookupRoleId($connection, $roleName);
+            if ($roleId === null) {
+                continue;
+            }
+
+            $userStatement = $connection->prepare('SELECT id FROM users WHERE role_id = :role_id');
+            $userStatement->execute(['role_id' => $roleId]);
+            $userIds = array_map('intval', $userStatement->fetchAll(PDO::FETCH_COLUMN));
+
+            if ($userIds === []) {
+                continue;
+            }
+
+            $permissionNames = $permissionList === ['*']
+                ? array_keys(self::DEFAULT_PERMISSIONS)
+                : $permissionList;
+
+            $permissionIds = self::lookupPermissionIds($connection, $permissionNames);
+            if ($permissionIds === []) {
+                continue;
+            }
+
+            $insert = $connection->prepare(
+                'INSERT IGNORE INTO user_permissions (user_id, permission_id, granted_by)
+                 VALUES (:user_id, :permission_id, NULL)'
+            );
+
+            foreach ($userIds as $userId) {
+                foreach ($permissionIds as $permissionId) {
+                    $insert->execute([
+                        'user_id' => $userId,
+                        'permission_id' => $permissionId,
+                    ]);
+                }
+            }
+        }
+    }
+
+    /**
+     * @param array<int, string> $names
+     * @return array<int, int>
+     */
+    private static function lookupPermissionIds(PDO $connection, array $names): array
+    {
+        if ($names === []) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($names), '?'));
+        $statement = $connection->prepare(
+            "SELECT id, name FROM permissions WHERE name IN ({$placeholders})"
+        );
+        $statement->execute($names);
+        $map = [];
+
+        while ($row = $statement->fetch(PDO::FETCH_ASSOC)) {
+            if (!isset($row['name'], $row['id'])) {
+                continue;
+            }
+            $map[$row['name']] = (int) $row['id'];
+        }
+
+        return array_values($map);
     }
 
     private static function lookupRoleId(PDO $connection, string $role): ?int

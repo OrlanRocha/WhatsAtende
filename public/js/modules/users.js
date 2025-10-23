@@ -16,10 +16,22 @@ export function initUserModal(modalSelector, formSelector) {
     const passwordConfirmation = form.querySelector('#user_password_confirmation');
     const modalTitle = modalElement.querySelector('.modal-title');
     const methodField = form.querySelector('#user-form-method');
+    const permissionInputs = Array.from(form.querySelectorAll('[data-permission-checkbox]'));
+    const customPermissionsInput = form.querySelector('#user_custom_permissions');
+
+    const resetPermissions = () => {
+        permissionInputs.forEach((checkbox) => {
+            checkbox.checked = false;
+        });
+        if (customPermissionsInput) {
+            customPermissionsInput.value = '';
+        }
+    };
 
     modalElement.addEventListener('show.bs.modal', (event) => {
         const trigger = event.relatedTarget;
         const mode = trigger?.getAttribute('data-mode') || 'create';
+        resetPermissions();
         if (mode === 'edit') {
             const row = trigger.closest('[data-user-row]');
             if (!row) {
@@ -48,6 +60,30 @@ export function initUserModal(modalSelector, formSelector) {
                 passwordConfirmation.value = '';
                 passwordConfirmation.removeAttribute('required');
             }
+            const knownValues = new Map();
+            permissionInputs.forEach((input) => {
+                knownValues.set(input.value, input);
+            });
+            const permissionNames = Array.isArray(user.permission_names)
+                ? user.permission_names
+                : Array.isArray(user.permissions)
+                ? user.permissions.map((item) => (typeof item === 'string' ? item : item?.name))
+                : [];
+            const extras = [];
+            permissionNames.forEach((permission) => {
+                if (!permission) {
+                    return;
+                }
+                const checkbox = knownValues.get(permission);
+                if (checkbox) {
+                    checkbox.checked = true;
+                } else {
+                    extras.push(permission);
+                }
+            });
+            if (customPermissionsInput) {
+                customPermissionsInput.value = extras.join(', ');
+            }
             if (modalTitle) {
                 modalTitle.textContent = 'Editar usuário';
             }
@@ -62,6 +98,9 @@ export function initUserModal(modalSelector, formSelector) {
             }
             if (passwordConfirmation) {
                 passwordConfirmation.setAttribute('required', 'required');
+            }
+            if (customPermissionsInput) {
+                customPermissionsInput.value = '';
             }
             if (modalTitle) {
                 modalTitle.textContent = 'Novo usuário';
@@ -87,6 +126,15 @@ export async function refreshUserTable(tableSelector, endpoint) {
         tbody.innerHTML = data.users.map((user) => {
             const userJson = escapeHtml(JSON.stringify(user));
             const badge = user.is_active ? '<span class="badge rounded-pill text-bg-success"><i class="bi bi-check-circle"></i> Sim</span>' : '<span class="badge rounded-pill text-bg-danger"><i class="bi bi-x-circle"></i> Não</span>';
+            const permissions = Array.isArray(user.permissions) ? user.permissions : [];
+            const permissionBadges = permissions.length
+                ? `<div class="d-flex flex-wrap gap-1">${permissions
+                      .map((permission) => {
+                          const label = typeof permission === 'string' ? permission : permission?.label || permission?.name || '';
+                          return `<span class="badge rounded-pill text-bg-light border">${escapeHtml(label)}</span>`;
+                      })
+                      .join('')}</div>`
+                : '<span class="text-muted small">—</span>';
             return `
                 <tr data-user-row data-user="${userJson}">
                     <td>${user.id}</td>
@@ -96,6 +144,7 @@ export async function refreshUserTable(tableSelector, endpoint) {
                     <td><span class="badge bg-gradient text-capitalize">${escapeHtml(user.role)}</span></td>
                     <td>${badge}</td>
                     <td>${user.assigned_tickets ?? 0}</td>
+                    <td>${permissionBadges}</td>
                     <td class="text-end">
                         <div class="btn-group" role="group">
                             <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#userModal" data-mode="edit">
