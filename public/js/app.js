@@ -82,13 +82,18 @@ export async function request(url, options = {}) {
             'X-Requested-With': 'XMLHttpRequest',
             Accept: 'application/json',
         },
+        credentials: 'same-origin',
     };
 
     const config = { ...defaults, ...options };
     config.method = (config.method || 'GET').toUpperCase();
     config.headers = { ...defaults.headers, ...(options.headers || {}) };
 
-    if (config.body && !(config.body instanceof FormData)) {
+    if (
+        config.body &&
+        !(config.body instanceof FormData) &&
+        !(config.body instanceof URLSearchParams)
+    ) {
         config.headers['Content-Type'] = 'application/json';
         config.body = JSON.stringify(config.body);
     }
@@ -210,11 +215,37 @@ async function handleAjaxSubmit(event) {
 
     try {
         const formData = new FormData(form);
+        const hasFileInput = Array.from(form.elements || []).some(
+            (element) =>
+                element instanceof HTMLInputElement &&
+                element.type === 'file' &&
+                element.files &&
+                element.files.length > 0
+        );
+        const isMultipart =
+            hasFileInput ||
+            (typeof form.enctype === 'string' &&
+                form.enctype.toLowerCase().includes('multipart'));
+        let body;
+        if (isMultipart) {
+            body = formData;
+        } else {
+            body = new URLSearchParams();
+            formData.forEach((value, key) => {
+                if (value instanceof File) {
+                    if (value.name) {
+                        body.append(key, value.name);
+                    }
+                    return;
+                }
+                body.append(key, typeof value === 'string' ? value : String(value ?? ''));
+            });
+        }
         const method = (form.dataset.method || form.method || 'POST').toUpperCase();
         const url = form.getAttribute('action') || window.location.href;
         const data = await request(url, {
             method,
-            body: formData,
+            body,
         });
 
         const message = form.dataset.successMessage || data?.message;
