@@ -54,6 +54,11 @@ final class DatabaseBootstrapper
             'templates.manage',
             'reports.view',
         ],
+        'supervisor' => [
+            'tickets.manage',
+            'tickets.assign',
+            'reports.view',
+        ],
         'dev' => ['*'],
     ];
 

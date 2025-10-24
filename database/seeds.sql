@@ -6,7 +6,9 @@ DELETE FROM login_attempts;
 -- Ensure base roles exist with consistent identifiers
 INSERT INTO roles (id, name) VALUES
     (1, 'admin'),
-    (2, 'agent')
+    (2, 'agent'),
+    (3, 'supervisor'),
+    (4, 'dev')
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO permissions (
