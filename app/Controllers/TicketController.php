@@ -420,17 +420,22 @@ class TicketController
     public function messages(int $ticketId): void
     {
         require_auth();
+
         try {
             $ticket = $this->ticketService->getTicketWithMessages($ticketId);
+            json_response($ticket['messages'] ?? []);
         } catch (\Throwable $exception) {
-            http_response_code(404);
-            header('Content-Type: application/json');
-            echo json_encode([]);
-            return;
-        }
+            $this->logger->error('ticket.messages_fetch_failed', [
+                'ticket_id' => $ticketId,
+                'error' => $exception->getMessage(),
+            ]);
 
-        header('Content-Type: application/json');
-        echo json_encode($ticket['messages'] ?? []);
+            json_response([
+                'messages' => [],
+                'status' => 'missing',
+                'error' => 'Ticket não encontrado ou inacessível.',
+            ]);
+        }
     }
 
     public function resolve(int $ticketId): void

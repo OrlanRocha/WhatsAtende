@@ -48,7 +48,12 @@ const loadProfileAvatar = async (element) => {
     };
 
     if (profileCache.has(url)) {
-        applyAvatar(profileCache.get(url));
+        const cached = profileCache.get(url);
+        if (cached) {
+            applyAvatar(cached);
+        } else {
+            element.classList.add('avatar-empty');
+        }
         return;
     }
 
@@ -56,13 +61,20 @@ const loadProfileAvatar = async (element) => {
         const response = await fetch(url, {
             headers: { 'X-Requested-With': 'XMLHttpRequest' },
         });
+        if (response.status === 204) {
+            profileCache.set(url, null);
+            element.classList.add('avatar-empty');
+            return;
+        }
         if (!response.ok) {
             throw new Error('Request failed');
         }
 
         const contentType = response.headers.get('Content-Type') || '';
         if (!contentType.startsWith('image/')) {
-            throw new Error('Unsupported content');
+            profileCache.set(url, null);
+            element.classList.add('avatar-empty');
+            return;
         }
 
         const blob = await response.blob();
@@ -70,6 +82,7 @@ const loadProfileAvatar = async (element) => {
         profileCache.set(url, objectUrl);
         applyAvatar(objectUrl);
     } catch (error) {
+        profileCache.set(url, null);
         element.classList.add('avatar-empty');
     }
 };
@@ -480,15 +493,64 @@ export function initChat(selector) {
         }
     }
 
-    const fetchMessages = async () => {
-        if (!ticketId) {
+    let messagePollingHandle = null;
+    let messagePollingSuspended = false;
+    let messageFetchNotified = false;
+
+    const stopMessagePolling = () => {
+        if (messagePollingHandle !== null) {
+            window.clearInterval(messagePollingHandle);
+            messagePollingHandle = null;
+        }
+    };
+
+    const ensureMessagePolling = () => {
+        if (messagePollingHandle === null && ticketId && !messagePollingSuspended) {
+            messagePollingHandle = window.setInterval(() => fetchMessages(), 5000);
+        }
+    };
+
+    const fetchMessages = async ({ force = false } = {}) => {
+        if (!ticketId || (messagePollingSuspended && !force)) {
             return;
         }
+
         try {
             const data = await request(`/tickets/${ticketId}/messages`, { method: 'GET' });
-            renderMessages(chatWindow, Array.isArray(data) ? data : []);
+            const messages = Array.isArray(data)
+                ? data
+                : Array.isArray(data?.messages)
+                    ? data.messages
+                    : [];
+
+            renderMessages(chatWindow, messages);
+
+            if (data?.status === 'missing') {
+                messagePollingSuspended = true;
+                stopMessagePolling();
+                if (!messageFetchNotified) {
+                    showToast('Ticket não está mais disponível.', 'warning');
+                    messageFetchNotified = true;
+                }
+                return;
+            }
+
+            if (messagePollingSuspended) {
+                messagePollingSuspended = false;
+                ensureMessagePolling();
+            }
+
+            if (data?.error && !messageFetchNotified) {
+                showToast(data.error, 'warning');
+                messageFetchNotified = true;
+            } else if (!data?.error) {
+                messageFetchNotified = false;
+            }
         } catch (error) {
-            showToast('Não foi possível atualizar o chat.', 'error');
+            if (!messageFetchNotified) {
+                showToast('Não foi possível atualizar o chat.', 'error');
+                messageFetchNotified = true;
+            }
         }
     };
 
@@ -524,7 +586,7 @@ export function initChat(selector) {
                 if (attachmentInput) {
                     attachmentInput.value = '';
                 }
-                fetchMessages();
+                fetchMessages({ force: true });
                 showToast('Mensagem enviada.');
             } catch (error) {
                 showToast(error?.data?.error || 'Não foi possível enviar a mensagem.', 'error');
@@ -567,7 +629,7 @@ export function initChat(selector) {
             }).then(() => {
                 storeRecentResponse(body);
                 showToast('Template enviado.');
-                fetchMessages();
+                fetchMessages({ force: true });
             }).catch((error) => {
                 showToast(error?.data?.error || 'Não foi possível enviar o template.', 'error');
             }).finally(() => {
@@ -606,7 +668,7 @@ export function initChat(selector) {
     });
 
     if (refreshButton) {
-        refreshButton.addEventListener('click', fetchMessages);
+        refreshButton.addEventListener('click', () => fetchMessages({ force: true }));
     }
 
     if (resolveButton) {
@@ -664,6 +726,6 @@ export function initChat(selector) {
         loadProfileAvatar(profileAvatar);
     }
 
-    fetchMessages();
-    setInterval(fetchMessages, 5000);
+    fetchMessages({ force: true });
+    ensureMessagePolling();
 }

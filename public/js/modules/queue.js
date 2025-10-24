@@ -26,7 +26,12 @@ const loadAvatar = async (element) => {
     };
 
     if (avatarCache.has(url)) {
-        apply(avatarCache.get(url));
+        const cached = avatarCache.get(url);
+        if (cached) {
+            apply(cached);
+        } else {
+            element.classList.add('avatar-empty');
+        }
         return;
     }
 
@@ -34,13 +39,20 @@ const loadAvatar = async (element) => {
         const response = await fetch(url, {
             headers: { 'X-Requested-With': 'XMLHttpRequest' },
         });
+        if (response.status === 204) {
+            avatarCache.set(url, null);
+            element.classList.add('avatar-empty');
+            return;
+        }
         if (!response.ok) {
             throw new Error('Request failed');
         }
 
         const contentType = response.headers.get('Content-Type') || '';
         if (!contentType.startsWith('image/')) {
-            throw new Error('Not an image');
+            avatarCache.set(url, null);
+            element.classList.add('avatar-empty');
+            return;
         }
 
         const blob = await response.blob();
@@ -48,6 +60,7 @@ const loadAvatar = async (element) => {
         avatarCache.set(url, objectUrl);
         apply(objectUrl);
     } catch (error) {
+        avatarCache.set(url, null);
         element.classList.add('avatar-empty');
     }
 };
