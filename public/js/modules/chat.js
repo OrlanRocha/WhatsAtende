@@ -232,17 +232,19 @@ const applySlaStatus = (container) => {
     if (!container) {
         return;
     }
+    const countdown = container.querySelector('[data-sla-countdown]');
+    const progress = container.querySelector('[data-sla-progress]');
     const slaDue = container.getAttribute('data-sla-due');
     if (!slaDue) {
-        container.querySelector('[data-sla-countdown]')?.textContent = 'Sem SLA configurado.';
+        if (countdown) {
+            countdown.textContent = 'Sem SLA configurado.';
+        }
         return;
     }
     const due = new Date(slaDue);
     if (Number.isNaN(due.getTime())) {
         return;
     }
-    const countdown = container.querySelector('[data-sla-countdown]');
-    const progress = container.querySelector('[data-sla-progress]');
 
     const update = () => {
         const now = new Date();
