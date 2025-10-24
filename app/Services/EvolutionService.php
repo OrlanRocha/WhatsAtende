@@ -1245,7 +1245,23 @@ class EvolutionService
 
     private function sanitizeContactNumber(string $number): string
     {
-        $digitsOnly = preg_replace('/\D+/', '', $number);
+        $trimmed = trim($number);
+        if ($trimmed === '') {
+            throw new RuntimeException('Número inválido informado para Evolution API.');
+        }
+
+        if (str_contains($trimmed, '@')) {
+            $normalized = function_exists('mb_substr')
+                ? mb_substr($trimmed, 0, 191)
+                : substr($trimmed, 0, 191);
+            if (!preg_match('/^[0-9A-Za-z._:@-]+$/', $normalized)) {
+                throw new RuntimeException('Número inválido informado para Evolution API.');
+            }
+
+            return $normalized;
+        }
+
+        $digitsOnly = preg_replace('/\D+/', '', $trimmed);
         if ($digitsOnly === null || $digitsOnly === '') {
             throw new RuntimeException('Número inválido informado para Evolution API.');
         }
