@@ -263,33 +263,55 @@ class EvolutionService
             'messageId' => $messageId,
         ]);
 
-        if (!$response['success']) {
-            return ['status' => $response['status'], 'error' => $response['error'] ?? 'Erro ao baixar mídia.'];
+        if (!($response['success'] ?? false)) {
+            return [
+                'status' => (int) ($response['status'] ?? 500),
+                'error' => $response['error_detail'] ?? $response['error'] ?? 'Erro ao baixar mídia.',
+            ];
         }
 
-        $data = $response['data'] ?? [];
-        $mime = (string) ($data['mimetype'] ?? $response['content_type'] ?? 'application/octet-stream');
-        $contents = null;
-        if (isset($data['data']) && is_string($data['data'])) {
-            $contents = base64_decode($data['data'], true);
-        } elseif (isset($data['fileBase64']) && is_string($data['fileBase64'])) {
-            $contents = base64_decode($data['fileBase64'], true);
-        } elseif (isset($data['url']) && is_string($data['url'])) {
-            $downloaded = $this->downloadBinary($data['url']);
-            if ($downloaded !== null) {
-                [$contents, $mime] = $downloaded;
-            }
+        $data = is_array($response['data'] ?? null) ? $response['data'] : [];
+        $mime = (string) ($data['mimetype']
+            ?? $data['mimeType']
+            ?? $data['mime_type']
+            ?? $response['content_type']
+            ?? 'application/octet-stream');
+
+        $payload = $this->extractMediaPayload($response, $config);
+        if ($payload === null) {
+            $this->logger->error('evolution.media_payload_missing', [
+                'message_id' => $messageId,
+                'status' => $response['status'] ?? null,
+                'keys' => is_array($response['data'] ?? null) ? implode(',', array_keys($response['data'])) : gettype($response['data'] ?? null),
+            ]);
+
+            return [
+                'status' => 502,
+                'error' => 'Conteúdo da mídia não retornado pela Evolution.',
+            ];
         }
 
-        if (!is_string($contents)) {
-            return ['status' => 502, 'error' => 'Conteúdo da mídia não retornado pela Evolution.'];
+        [$contents, $detectedMime] = $payload;
+        if (is_string($detectedMime) && $detectedMime !== '') {
+            $mime = $detectedMime;
         }
 
         $extension = $this->extensionFromMime($mime) ?? '';
         $cachePath = $cacheBase . $extension;
 
         $this->ensureDirectory(dirname($cachePath));
-        file_put_contents($cachePath, $contents);
+        $bytes = @file_put_contents($cachePath, $contents);
+        if ($bytes === false) {
+            $this->logger->error('evolution.media_cache_failed', [
+                'message_id' => $messageId,
+                'path' => $cachePath,
+            ]);
+
+            return [
+                'status' => 500,
+                'error' => 'Falha ao salvar mídia no cache local.',
+            ];
+        }
 
         return ['status' => 200, 'path' => $cachePath, 'content_type' => $mime];
     }
@@ -964,6 +986,16 @@ class EvolutionService
         return $value;
     }
 
+    /**
+     * @param array<string, mixed> $array
+     * @param array<int, string> $path
+     */
+    private function arrayGetString(array $array, array $path): ?string
+    {
+        $value = $this->arrayGet($array, $path);
+        return is_string($value) ? trim($value) : null;
+    }
+
     private function buildMediaUrl(string $messageId): string
     {
         return '/api/evolution/media?messageId=' . rawurlencode($messageId);
@@ -972,6 +1004,195 @@ class EvolutionService
     private function buildProfileUrl(string $remoteJid): string
     {
         return '/api/evolution/profile?remoteJid=' . rawurlencode($remoteJid);
+    }
+
+    /**
+     * @param array<string, mixed> $response
+     * @param array<string, mixed> $config
+     * @return array{0:string,1:?string}|null
+     */
+    private function extractMediaPayload(array $response, array $config): ?array
+    {
+        $contentType = isset($response['content_type']) && is_string($response['content_type'])
+            ? $response['content_type']
+            : null;
+
+        $body = $response['body'] ?? null;
+        if (is_string($body) && $body !== '' && ($contentType === null || !str_contains(strtolower($contentType), 'json'))) {
+            return [$body, $contentType];
+        }
+
+        $data = $response['data'] ?? null;
+        $candidates = [];
+
+        if (is_string($data) && trim($data) !== '') {
+            $candidates[] = $data;
+        }
+
+        if (is_array($data)) {
+            $paths = [
+                ['data'],
+                ['fileBase64'],
+                ['file'],
+                ['fileUrl'],
+                ['file_url'],
+                ['media'],
+                ['base64'],
+                ['buffer'],
+                ['buffer', 'data'],
+                ['buffer', 'file'],
+                ['buffer', 'base64'],
+                ['payload', 'data'],
+                ['payload', 'file'],
+                ['payload', 'base64'],
+                ['url'],
+                ['mediaUrl'],
+                ['media_url'],
+                ['directPath'],
+                ['downloadUrl'],
+                ['download_url'],
+            ];
+
+            foreach ($paths as $path) {
+                $value = $this->arrayGetString($data, $path);
+                if ($value !== null && $value !== '') {
+                    $candidates[] = $value;
+                }
+            }
+
+            foreach (['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage', 'stickerMessage'] as $mediaKey) {
+                if (!isset($data[$mediaKey]) || !is_array($data[$mediaKey])) {
+                    continue;
+                }
+
+                foreach (['url', 'directPath'] as $path) {
+                    $value = $this->arrayGetString($data[$mediaKey], [$path]);
+                    if ($value !== null && $value !== '') {
+                        $candidates[] = $value;
+                    }
+                }
+            }
+        }
+
+        foreach ($candidates as $candidate) {
+            $parsed = $this->parseMediaString($candidate, $config);
+            if ($parsed !== null) {
+                return $parsed;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     * @return array{0:string,1:?string}|null
+     */
+    private function parseMediaString(string $value, array $config): ?array
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+
+        if (str_starts_with($value, 'data:')) {
+            $parsed = $this->parseDataUrl($value);
+            if ($parsed !== null) {
+                return $parsed;
+            }
+        }
+
+        if (str_starts_with($value, 'http://') || str_starts_with($value, 'https://') || str_starts_with($value, '//') || str_starts_with($value, '/')) {
+            $url = $this->normalizeMediaUrl($value, $config);
+            $downloaded = $this->downloadBinary($url);
+            if ($downloaded !== null) {
+                return $downloaded;
+            }
+        }
+
+        $decoded = $this->decodeBase64Media($value);
+        if ($decoded !== null) {
+            return [$decoded, null];
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function normalizeMediaUrl(string $value, array $config): string
+    {
+        if (str_starts_with($value, '//')) {
+            return 'https:' . $value;
+        }
+
+        if (str_starts_with($value, '/')) {
+            if (preg_match('#^/v/#i', $value) === 1) {
+                return 'https://mmg.whatsapp.net' . $value;
+            }
+
+            $base = isset($config['base_url']) && is_string($config['base_url']) ? rtrim($config['base_url'], '/') : '';
+            if ($base !== '') {
+                return $base . $value;
+            }
+        }
+
+        if (!str_starts_with($value, 'http://') && !str_starts_with($value, 'https://')) {
+            $base = isset($config['base_url']) && is_string($config['base_url']) ? rtrim($config['base_url'], '/') : '';
+            if ($base !== '') {
+                return $base . '/' . ltrim($value, '/');
+            }
+        }
+
+        return $value;
+    }
+
+    private function decodeBase64Media(string $value): ?string
+    {
+        $clean = preg_replace('/\s+/', '', $value);
+        if ($clean === null || $clean === '') {
+            return null;
+        }
+
+        if (strlen($clean) < 16) {
+            return null;
+        }
+
+        if (preg_match('/^[A-Za-z0-9\-_/+=]+$/', $clean) !== 1) {
+            return null;
+        }
+
+        $normalized = strtr($clean, '-_', '+/');
+        $padLength = strlen($normalized) % 4;
+        if ($padLength !== 0) {
+            $normalized .= str_repeat('=', 4 - $padLength);
+        }
+
+        $decoded = base64_decode($normalized, true);
+        if ($decoded === false) {
+            return null;
+        }
+
+        return $decoded === '' ? null : $decoded;
+    }
+
+    /**
+     * @return array{0:string,1:?string}|null
+     */
+    private function parseDataUrl(string $value): ?array
+    {
+        if (!preg_match('#^data:(?P<mime>[^;,]+)?(?P<params>(;[^,]+)*)?;base64,(?P<data>.+)$#i', $value, $matches)) {
+            return null;
+        }
+
+        $mime = isset($matches['mime']) && $matches['mime'] !== '' ? strtolower(trim($matches['mime'])) : null;
+        $decoded = $this->decodeBase64Media($matches['data']);
+        if ($decoded === null) {
+            return null;
+        }
+
+        return [$decoded, $mime];
     }
 
     private function extractTimestamp(mixed $value): ?string
