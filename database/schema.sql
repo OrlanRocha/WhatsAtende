@@ -297,7 +297,7 @@ CREATE INDEX idx_ticket_sla_due_at ON tickets(sla_due_at);
 CREATE INDEX idx_ticket_predicted_priority ON tickets(predicted_priority);
 CREATE INDEX idx_messages_ticket_sent_at ON messages(ticket_id, sent_at);
 CREATE INDEX idx_messages_created_at ON messages(sent_at);
-CREATE UNIQUE INDEX idx_logs_corr ON logs(corr_id);
+CREATE INDEX idx_logs_corr ON logs(corr_id);
 CREATE INDEX idx_logs_service_level ON logs(service, level);
 CREATE INDEX idx_logs_created_at ON logs(created_at);
 CREATE INDEX idx_user_status_online_load ON user_status(online, current_load);

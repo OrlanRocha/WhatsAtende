@@ -7,7 +7,11 @@ namespace App\Services;
 use DateTimeImmutable;
 use DateTimeInterface;
 use PDO;
+use PDOException;
 use PDOStatement;
+use Throwable;
+
+use function app_logger;
 
 class LoggerService
 {
@@ -49,11 +53,7 @@ class LoggerService
             if (function_exists('request_correlation_id')) {
                 $corrId = request_correlation_id();
             } else {
-                try {
-                    $corrId = bin2hex(random_bytes(8));
-                } catch (\Throwable) {
-                    $corrId = uniqid('corr_', true);
-                }
+                $corrId = $this->generateCorrelationId();
             }
         }
 
@@ -83,12 +83,10 @@ class LoggerService
             ], $options);
         }
 
-        $stmt = $this->connection->prepare(
-            'INSERT INTO logs (actor_id, level, action, message, context, ip_address, route, service, corr_id)'
-            . ' VALUES (:actor_id, :level, :action, :message, :context, :ip_address, :route, :service, :corr_id)'
-        );
+        $sql = 'INSERT INTO logs (actor_id, level, action, message, context, ip_address, route, service, corr_id)'
+            . ' VALUES (:actor_id, :level, :action, :message, :context, :ip_address, :route, :service, :corr_id)';
 
-        $stmt->execute([
+        $params = [
             'actor_id' => $actorId,
             'level' => $level,
             'action' => $action,
@@ -98,6 +96,68 @@ class LoggerService
             'route' => $route,
             'service' => $service,
             'corr_id' => $corrId,
+        ];
+
+        try {
+            $stmt = $this->connection->prepare($sql);
+            $stmt->execute($params);
+
+            return;
+        } catch (PDOException $exception) {
+            if ($this->isDuplicateCorrelationException($exception)) {
+                $params['corr_id'] = $this->generateCorrelationId($corrId);
+
+                try {
+                    $stmt = $this->connection->prepare($sql);
+                    $stmt->execute($params);
+
+                    return;
+                } catch (PDOException $retryException) {
+                    $this->reportFailure($retryException, $action, $params['corr_id']);
+
+                    return;
+                }
+            }
+
+            $this->reportFailure($exception, $action, $corrId);
+        }
+    }
+
+    private function generateCorrelationId(?string $seed = null): string
+    {
+        $prefix = $seed !== null ? trim(substr($seed, 0, 40)) : '';
+
+        try {
+            $random = bin2hex(random_bytes(4));
+        } catch (Throwable) {
+            $random = str_replace('.', '', uniqid('', true));
+        }
+
+        return $prefix !== '' ? $prefix . '-' . $random : $random;
+    }
+
+    private function isDuplicateCorrelationException(PDOException $exception): bool
+    {
+        $errorInfo = $exception->errorInfo;
+        if (is_array($errorInfo) && isset($errorInfo[0], $errorInfo[1]) && (int) $errorInfo[1] === 1062) {
+            return true;
+        }
+
+        $message = strtolower($exception->getMessage());
+
+        return str_contains($message, 'duplicate entry') && str_contains($message, 'idx_logs_corr');
+    }
+
+    private function reportFailure(PDOException $exception, string $action, string $corrId): void
+    {
+        if (!function_exists('app_logger')) {
+            return;
+        }
+
+        app_logger()->error('logger.database.write_failed', [
+            'action' => $action,
+            'corr_id' => $corrId,
+            'error' => $exception->getMessage(),
         ]);
     }
 

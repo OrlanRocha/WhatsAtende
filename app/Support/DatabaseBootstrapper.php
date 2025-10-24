@@ -66,6 +66,7 @@ final class DatabaseBootstrapper
         }
 
         try {
+            self::ensureLogsIndexes($connection);
             self::ensureRoles($connection);
             self::ensurePermissions($connection);
             self::ensureAdminAccount($connection);
@@ -76,6 +77,47 @@ final class DatabaseBootstrapper
             app_logger()->error('database.bootstrap.failed', [
                 'message' => $exception->getMessage(),
             ]);
+        }
+    }
+
+    private static function ensureLogsIndexes(PDO $connection): void
+    {
+        try {
+            $statement = $connection->query("SHOW INDEX FROM logs WHERE Key_name = 'idx_logs_corr'");
+        } catch (PDOException) {
+            return;
+        }
+
+        $indexes = $statement ? $statement->fetchAll(PDO::FETCH_ASSOC) : [];
+
+        if ($indexes === []) {
+            try {
+                $connection->exec('CREATE INDEX idx_logs_corr ON logs(corr_id)');
+            } catch (PDOException) {
+                // ignore when the index cannot be created (older MySQL versions or permissions)
+            }
+
+            return;
+        }
+
+        $isUnique = false;
+
+        foreach ($indexes as $index) {
+            if (($index['Key_name'] ?? '') === 'idx_logs_corr') {
+                $isUnique = ((int) ($index['Non_unique'] ?? 1)) === 0;
+                break;
+            }
+        }
+
+        if (!$isUnique) {
+            return;
+        }
+
+        try {
+            $connection->exec('ALTER TABLE logs DROP INDEX idx_logs_corr');
+            $connection->exec('CREATE INDEX idx_logs_corr ON logs(corr_id)');
+        } catch (PDOException) {
+            // If we cannot alter the index we silently ignore so the app can keep running.
         }
     }
 
