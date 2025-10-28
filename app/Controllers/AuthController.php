@@ -163,24 +163,17 @@ class AuthController
         $email = filter_input(INPUT_POST, 'email', FILTER_SANITIZE_EMAIL) ?: '';
 
         if ($email !== '') {
-            $token = $this->authService->createPasswordReset($email);
-            if ($token) {
-                $message = 'Link de redefinição gerado. Utilize o token abaixo para continuar: ' . $token;
-                if (is_ajax()) {
-                    json_response(['message' => $message]);
-                }
-                set_flash('auth_status', $message);
-                redirect('/forgot-password');
-            }
+            // Dispara o processo de geração do token sem expor o valor ao requisitante.
+            $this->authService->createPasswordReset($email);
         }
 
-        $fallback = 'Se o e-mail existir em nossa base, você receberá instruções em instantes.';
+        $message = 'Se o e-mail existir em nossa base, você receberá instruções em instantes.';
 
         if (is_ajax()) {
-            json_response(['message' => $fallback]);
+            json_response(['message' => $message]);
         }
 
-        set_flash('auth_status', $fallback);
+        set_flash('auth_status', $message);
         redirect('/forgot-password');
     }
 
