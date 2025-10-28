@@ -35,7 +35,22 @@ class WebhookService
                 throw new \InvalidArgumentException('Contact identifier is required.');
             }
 
-            $this->storeWebhookEvent($provider, $messageId, $payload);
+            $isNewEvent = $this->storeWebhookEvent($provider, $messageId, $payload);
+
+            if (! $isNewEvent) {
+                $this->connection->commit();
+
+                $existingTicketId = $messageId !== null
+                    ? $this->findTicketIdByMessageId($messageId)
+                    : null;
+
+                $this->logger->info('webhook.duplicate_message_skipped', [
+                    'ticket_id' => $existingTicketId,
+                    'message_id' => $messageId,
+                ]);
+
+                return (int) ($existingTicketId ?? 0);
+            }
 
             $contactId = $this->findOrCreateContact($contactExternalId, $contactName);
             $ticketId = $this->findOrCreateTicket($contactId, $channel);
@@ -83,7 +98,7 @@ class WebhookService
     /**
      * @param array<string, mixed> $payload
      */
-    private function storeWebhookEvent(string $provider, ?string $messageId, array $payload): void
+    private function storeWebhookEvent(string $provider, ?string $messageId, array $payload): bool
     {
         $stmt = $this->connection->prepare(
             'INSERT INTO webhook_events (provider, external_message_id, payload, processed, processed_at)
@@ -97,6 +112,23 @@ class WebhookService
             'payload' => json_encode($payload),
             'processed_at' => (new DateTimeImmutable())->format('Y-m-d H:i:s'),
         ]);
+
+        return $stmt->rowCount() === 1;
+    }
+
+    private function findTicketIdByMessageId(string $messageId): ?int
+    {
+        $stmt = $this->connection->prepare(
+            'SELECT ticket_id FROM messages WHERE metadata LIKE :message_id ORDER BY id DESC LIMIT 1'
+        );
+
+        $stmt->execute([
+            'message_id' => '%"id":"' . $messageId . '"%',
+        ]);
+
+        $ticketId = $stmt->fetchColumn();
+
+        return $ticketId !== false ? (int) $ticketId : null;
     }
 
     private function findOrCreateContact(string $externalId, ?string $name): int
