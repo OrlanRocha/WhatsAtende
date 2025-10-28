@@ -334,7 +334,7 @@ class EvolutionService
             ]],
         ];
 
-        return $this->makeRequest($config, 'PUT', '/chat/markMessageAsRead/' . $config['instance'], $payload);
+        return $this->makeRequest($config, 'POST', '/chat/markMessageAsRead/' . $config['instance'], $payload);
     }
 
     /**
