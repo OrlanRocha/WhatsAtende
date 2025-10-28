@@ -438,6 +438,49 @@ class TicketController
         }
     }
 
+    public function updateStatus(int $ticketId): void
+    {
+        $user = require_permission('tickets.manage');
+        $payload = $this->getRequestPayload();
+        $status = $payload['status'] ?? ($_POST['status'] ?? null);
+        $status = is_string($status) ? trim($status) : '';
+
+        if ($status === '') {
+            json_response(['error' => 'Informe o status desejado para o ticket.'], 422);
+            return;
+        }
+
+        try {
+            $ticket = $this->ticketService->updateTicketStatus($ticketId, $status, (int) $user->id);
+        } catch (InvalidArgumentException $exception) {
+            json_response(['error' => $exception->getMessage()], 422);
+            return;
+        } catch (RuntimeException $exception) {
+            $this->logger->error('ticket.status_update_failed', [
+                'ticket_id' => $ticketId,
+                'status' => $status,
+                'error' => $exception->getMessage(),
+            ]);
+            json_response(['error' => 'Não foi possível atualizar o status do ticket.'], 400);
+            return;
+        } catch (Throwable $exception) {
+            $this->logger->error('ticket.status_update_failed', [
+                'ticket_id' => $ticketId,
+                'status' => $status,
+                'error' => $exception->getMessage(),
+            ]);
+            json_response(['error' => 'Ocorreu uma falha inesperada ao atualizar o ticket.'], 500);
+            return;
+        }
+
+        $label = $ticket['label'] ?? ucfirst((string) ($ticket['status'] ?? $status));
+
+        json_response([
+            'message' => sprintf('Status atualizado para %s.', $label),
+            'ticket' => $ticket,
+        ]);
+    }
+
     public function resolve(int $ticketId): void
     {
         $user = require_auth();

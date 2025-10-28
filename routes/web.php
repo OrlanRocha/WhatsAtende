@@ -59,6 +59,7 @@ return [
     ['POST', '/tickets/native/start', [TicketController::class, 'startNativeConversation']],
     ['POST', '/tickets/{id}/messages', [TicketController::class, 'storeMessage']],
     ['GET', '/tickets/{id}/messages', [TicketController::class, 'messages']],
+    ['POST', '/tickets/{id}/status', [TicketController::class, 'updateStatus']],
     ['POST', '/tickets/{id}/resolve', [TicketController::class, 'resolve']],
     ['GET', '/health', [HealthController::class, 'snapshot']],
     ['POST', '/api/webhook', [WebhookController::class, 'handle']],

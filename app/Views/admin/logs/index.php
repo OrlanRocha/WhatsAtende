@@ -158,20 +158,31 @@ include base_path('app/Views/partials/topbar.php');
             </table>
         </div>
     </section>
-    <section class="log-detail" data-log-detail hidden>
-        <header>
-            <h2>Detalhes do log</h2>
-            <div class="log-detail__actions">
-                <button class="btn btn-outline-secondary btn-sm" data-log-copy>
-                    <i class="bi bi-clipboard"></i> Copiar detalhes
-                </button>
-                <button class="btn btn-icon" data-log-close aria-label="Fechar">
-                    <i class="bi bi-x"></i>
-                </button>
+    <div class="modal-overlay modal-overlay--log" data-log-modal hidden>
+        <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="logModalTitle" tabindex="-1">
+            <header class="modal-header">
+                <div>
+                    <p class="modal-eyebrow">Detalhes do log</p>
+                    <h2 class="modal-title" id="logModalTitle">Payload estruturado</h2>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-outline-secondary btn-sm" type="button" data-log-copy>
+                        <i class="bi bi-clipboard"></i> Copiar JSON
+                    </button>
+                    <button class="btn btn-icon" type="button" data-log-close aria-label="Fechar">
+                        <i class="bi bi-x"></i>
+                    </button>
+                </div>
+            </header>
+            <div class="modal-body">
+                <pre class="log-modal__content" data-log-json></pre>
             </div>
-        </header>
-        <pre class="log-detail__content" data-log-json></pre>
-    </section>
+            <footer class="modal-footer">
+                <small class="text-muted">Pressione <kbd>Esc</kbd> para fechar</small>
+            </footer>
+        </div>
+        <button type="button" class="modal-backdrop" data-log-close aria-label="Fechar detalhes"></button>
+    </div>
 </div>
 <script type="module">
 import { initLogViewer } from <?= json_encode(route_path('/js/modules/logs.js')) ?>;

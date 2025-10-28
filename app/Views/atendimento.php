@@ -1,10 +1,46 @@
 <?php
+use App\Models\Ticket;
 /** @var array<string, mixed> $ticket */
 /** @var array<int, array<string, mixed>> $templates */
 $user = auth();
 $status = get_flash('auth_status');
 $contactName = trim((string) ($ticket['contact_name'] ?? 'Cliente'));
 $ticketId = (int) ($ticket['id'] ?? 0);
+$statusLabels = [
+    Ticket::STATUS_OPEN => 'Aberto',
+    Ticket::STATUS_ASSIGNED => 'Em atendimento',
+    Ticket::STATUS_RESOLVED => 'Resolvido',
+    Ticket::STATUS_CLOSED => 'Encerrado',
+];
+$ticketStatusKey = strtolower((string) ($ticket['status'] ?? Ticket::STATUS_OPEN));
+$ticketStatusLabel = $statusLabels[$ticketStatusKey] ?? ucfirst($ticketStatusKey);
+$statusTimeline = [
+    Ticket::STATUS_OPEN => [
+        'label' => 'Aberto',
+        'hint' => 'Ticket criado e aguardando triagem.',
+        'enabled' => true,
+    ],
+    Ticket::STATUS_ASSIGNED => [
+        'label' => 'Em atendimento',
+        'hint' => 'Agente em conversação ativa.',
+        'enabled' => true,
+    ],
+    Ticket::STATUS_RESOLVED => [
+        'label' => 'Resolvido',
+        'hint' => 'Atendimento concluído para o cliente.',
+        'enabled' => true,
+    ],
+    Ticket::STATUS_CLOSED => [
+        'label' => 'Encerrado',
+        'hint' => 'Ticket arquivado após revisão.',
+        'enabled' => false,
+    ],
+];
+$statusOrder = array_keys($statusTimeline);
+$currentStatusIndex = array_search($ticketStatusKey, $statusOrder, true);
+if ($currentStatusIndex === false) {
+    $currentStatusIndex = 0;
+}
 $contactInitial = function_exists('mb_substr')
     ? mb_strtoupper(mb_substr($contactName, 0, 1))
     : strtoupper(substr($contactName, 0, 1));
@@ -71,7 +107,7 @@ include base_path('app/Views/partials/topbar.php');
                 <div>
                     <h2><?= htmlspecialchars($contactName) ?></h2>
                     <div class="conversation-header__meta">
-                        <span class="status-badge status-badge--<?= htmlspecialchars((string) ($ticket['status'] ?? 'open')) ?>" data-ticket-status><?= htmlspecialchars((string) ($ticket['status'] ?? 'open')) ?></span>
+                        <span class="status-badge status-badge--<?= htmlspecialchars($ticketStatusKey) ?>" data-ticket-status data-status-key="<?= htmlspecialchars($ticketStatusKey) ?>"><?= htmlspecialchars($ticketStatusLabel) ?></span>
                         <span class="dot" aria-hidden="true"></span>
                         <span>Ticket #<?= htmlspecialchars((string) $ticketId) ?></span>
                         <span class="dot" aria-hidden="true"></span>
@@ -162,6 +198,34 @@ include base_path('app/Views/partials/topbar.php');
         </div>
     </section>
     <aside class="ticket-pane ticket-pane--context">
+        <section class="context-card">
+            <header>
+                <h3>Status do ticket</h3>
+            </header>
+            <div class="ticket-status-track" data-status-track data-current-status="<?= htmlspecialchars($ticketStatusKey) ?>">
+                <?php foreach ($statusTimeline as $statusKey => $meta): ?>
+                    <?php
+                    $position = array_search($statusKey, $statusOrder, true);
+                    $isActive = $position !== false && $position === $currentStatusIndex;
+                    $isComplete = $position !== false && $position < $currentStatusIndex;
+                    $classes = 'ticket-status-step';
+                    if ($isActive) {
+                        $classes .= ' is-active';
+                    } elseif ($isComplete) {
+                        $classes .= ' is-complete';
+                    }
+                    ?>
+                    <button type="button"
+                            class="<?= $classes ?>"
+                            data-status-step="<?= htmlspecialchars($statusKey) ?>"
+                            data-status-label="<?= htmlspecialchars($meta['label']) ?>"
+                            <?= $meta['enabled'] ? '' : 'disabled aria-disabled="true"' ?>>
+                        <span><?= htmlspecialchars($meta['label']) ?></span>
+                        <small><?= htmlspecialchars($meta['hint']) ?></small>
+                    </button>
+                <?php endforeach; ?>
+            </div>
+        </section>
         <section class="context-card">
             <header>
                 <h3>Contato</h3>

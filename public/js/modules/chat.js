@@ -334,6 +334,53 @@ export function initChat(selector) {
     const dropzone = container.querySelector('[data-dropzone]');
     const notes = container.querySelector('[data-internal-notes]');
     const slaPanel = container;
+    const statusTrack = container.querySelector('[data-status-track]');
+    const statusSteps = statusTrack ? Array.from(statusTrack.querySelectorAll('[data-status-step]')) : [];
+    const statusLabels = {
+        open: 'Aberto',
+        assigned: 'Em atendimento',
+        resolved: 'Resolvido',
+        closed: 'Encerrado',
+    };
+    const normaliseStatus = (value) => (value ?? '').toString().toLowerCase();
+    let currentStatus = normaliseStatus(
+        statusTrack?.getAttribute('data-current-status')
+        || statusBadge?.getAttribute('data-status-key')
+        || statusBadge?.textContent
+        || 'open',
+    );
+
+    const updateStatusBadge = (status, label) => {
+        if (!statusBadge) {
+            return;
+        }
+        const normalized = normaliseStatus(status) || 'open';
+        const text = label && String(label).trim() !== '' ? label : (statusLabels[normalized] ?? normalized);
+        statusBadge.textContent = text;
+        statusBadge.className = `status-badge status-badge--${normalized}`;
+        statusBadge.setAttribute('data-status-key', normalized);
+    };
+
+    const updateStatusTrack = (status) => {
+        if (!statusTrack) {
+            return;
+        }
+        currentStatus = normaliseStatus(status) || 'open';
+        statusTrack.setAttribute('data-current-status', currentStatus);
+        const activeIndex = statusSteps.findIndex((step) => normaliseStatus(step.getAttribute('data-status-step')) === currentStatus);
+        const computedIndex = activeIndex === -1 ? 0 : activeIndex;
+        statusSteps.forEach((step, index) => {
+            const isActive = index === computedIndex;
+            const isComplete = index < computedIndex;
+            step.classList.toggle('is-active', isActive);
+            step.classList.toggle('is-complete', isComplete);
+        });
+    };
+
+    const applyStatusState = (status, label) => {
+        updateStatusBadge(status, label);
+        updateStatusTrack(status);
+    };
 
     const draftKey = `whats-ticket-draft-${ticketId}`;
     if (input) {
@@ -349,6 +396,46 @@ export function initChat(selector) {
     hydrateQuickSuggestions(suggestionBar);
     persistNotes(notes, ticketId);
     applySlaStatus(slaPanel);
+    applyStatusState(currentStatus, statusBadge?.textContent ?? statusLabels[currentStatus]);
+
+    statusTrack?.addEventListener('click', async (event) => {
+        const target = event.target instanceof HTMLElement ? event.target.closest('[data-status-step]') : null;
+        if (!target || target.hasAttribute('disabled')) {
+            return;
+        }
+
+        const nextStatus = normaliseStatus(target.getAttribute('data-status-step'));
+        if (!nextStatus || nextStatus === currentStatus) {
+            return;
+        }
+
+        if (!ticketId) {
+            showToast('Não foi possível identificar o ticket selecionado.', 'error');
+            return;
+        }
+
+        statusTrack.classList.add('is-busy');
+
+        try {
+            const response = await request(`/tickets/${ticketId}/status`, {
+                method: 'POST',
+                body: { status: nextStatus },
+            });
+            const updatedStatus = normaliseStatus(response?.ticket?.status ?? nextStatus);
+            const updatedLabel = response?.ticket?.label ?? statusLabels[updatedStatus] ?? statusLabels[nextStatus] ?? nextStatus;
+            applyStatusState(updatedStatus, updatedLabel);
+            if (response?.message) {
+                showToast(response.message);
+            } else {
+                showToast(`Status atualizado para ${updatedLabel}.`);
+            }
+        } catch (error) {
+            const message = error?.data?.error || error?.message || 'Não foi possível atualizar o status do ticket.';
+            showToast(message, 'error');
+        } finally {
+            statusTrack.classList.remove('is-busy');
+        }
+    });
 
     let sidebarState = {
         mine: true,
@@ -680,10 +767,7 @@ export function initChat(selector) {
             try {
                 const data = await request(`/tickets/${ticketId}/resolve`, { method: 'POST' });
                 showToast(data?.message || 'Chamado resolvido.');
-                if (statusBadge) {
-                    statusBadge.textContent = 'resolved';
-                    statusBadge.className = 'status-badge status-badge--resolved';
-                }
+                applyStatusState('resolved', statusLabels.resolved);
                 if (data?.redirect) {
                     window.location.assign(data.redirect);
                 }

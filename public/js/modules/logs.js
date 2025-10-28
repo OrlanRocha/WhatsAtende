@@ -6,6 +6,8 @@ const escapeHtml = (value) => {
     return div.innerHTML;
 };
 
+const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
+
 const parseContext = (value) => {
     if (value === null || value === undefined) {
         return null;
@@ -150,25 +152,101 @@ export function initLogViewer(selector, endpoint) {
     const timeline = container.querySelector('[data-log-timeline]');
     const refreshButton = container.querySelector('[data-log-refresh]');
     const resetButton = container.querySelector('[data-log-reset]');
-    const detailPanel = container.querySelector('[data-log-detail]');
+    const modal = container.querySelector('[data-log-modal]');
+    const modalDialog = modal?.querySelector('.modal-dialog') ?? null;
     const detailContent = container.querySelector('[data-log-json]');
     const liveToggle = container.querySelector('[data-live-tail-toggle]');
 
     let logsData = [];
     let lastLogId = 0;
-        let liveEnabled = false;
+    let liveEnabled = false;
     let eventSource = null;
     let fallbackInterval = null;
+    let modalHideTimeout = null;
+    let focusableElements = [];
+    let lastFocusedElement = null;
 
     const closeDetail = () => {
-        detailPanel?.setAttribute('hidden', 'true');
+        if (!modal) {
+            return;
+        }
+
+        modal.classList.remove('is-visible');
+        if (modalHideTimeout) {
+            clearTimeout(modalHideTimeout);
+        }
+
+        modalHideTimeout = window.setTimeout(() => {
+            modal?.setAttribute('hidden', 'true');
+        }, 200);
+
         if (detailContent) {
             detailContent.textContent = '';
         }
+
+        if (lastFocusedElement instanceof HTMLElement) {
+            lastFocusedElement.focus({ preventScroll: true });
+        }
+
+        focusableElements = [];
     };
 
+    const openDetail = () => {
+        if (!modal) {
+            return;
+        }
+
+        if (modalHideTimeout) {
+            clearTimeout(modalHideTimeout);
+            modalHideTimeout = null;
+        }
+
+        lastFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        modal.removeAttribute('hidden');
+
+        window.requestAnimationFrame(() => {
+            modal.classList.add('is-visible');
+        });
+
+        const nodes = modal.querySelectorAll(FOCUSABLE_SELECTOR);
+        focusableElements = Array.from(nodes).filter((node) => node instanceof HTMLElement && !node.hasAttribute('disabled'));
+
+        const firstFocusable = focusableElements[0] ?? modalDialog ?? modal;
+        if (firstFocusable instanceof HTMLElement) {
+            firstFocusable.focus({ preventScroll: true });
+        }
+    };
+
+    const trapFocus = (event) => {
+        if (!modal?.classList.contains('is-visible') || event.key !== 'Tab' || focusableElements.length === 0) {
+            return;
+        }
+
+        const first = focusableElements[0];
+        const last = focusableElements[focusableElements.length - 1];
+
+        if (event.shiftKey) {
+            if (document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            }
+        } else if (document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+        }
+    };
+
+    modal?.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closeDetail();
+            return;
+        }
+        trapFocus(event);
+    });
+
     const renderDetail = (entry) => {
-        if (!entry || !detailPanel || !detailContent) {
+        if (!entry || !modal || !detailContent) {
             return;
         }
         const payload = {
@@ -184,7 +262,7 @@ export function initLogViewer(selector, endpoint) {
             message: entry.message,
             context: entry.context,
         };
-        detailPanel.removeAttribute('hidden');
+        openDetail();
         detailContent.textContent = JSON.stringify(payload, null, 2);
     };
 

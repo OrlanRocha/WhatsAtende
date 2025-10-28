@@ -468,6 +468,107 @@ class TicketService
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    public function updateTicketStatus(int $ticketId, string $status, int $actorId): array
+    {
+        $status = strtolower(trim($status));
+
+        $allowed = [
+            Ticket::STATUS_OPEN,
+            Ticket::STATUS_ASSIGNED,
+            Ticket::STATUS_RESOLVED,
+            Ticket::STATUS_CLOSED,
+        ];
+
+        if (!in_array($status, $allowed, true)) {
+            throw new InvalidArgumentException('Status informado não é suportado.');
+        }
+
+        $currentStmt = $this->connection->prepare('SELECT status FROM tickets WHERE id = :id');
+        $currentStmt->execute(['id' => $ticketId]);
+        $currentValue = $currentStmt->fetchColumn();
+
+        if ($currentValue === false) {
+            throw new RuntimeException('Ticket não encontrado.');
+        }
+
+        $currentStatus = strtolower((string) $currentValue);
+        if ($currentStatus === $status) {
+            return $this->fetchTicketStatus($ticketId);
+        }
+
+        if ($status === Ticket::STATUS_RESOLVED) {
+            $this->resolveTicket($ticketId);
+        } else {
+            $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+            $query = 'UPDATE tickets SET status = :status';
+            $params = [
+                'status' => $status,
+                'id' => $ticketId,
+            ];
+
+            if ($status === Ticket::STATUS_CLOSED) {
+                $query .= ', closed_at = :closed_at';
+                $params['closed_at'] = $now;
+            } else {
+                $query .= ', closed_at = NULL';
+            }
+
+            $query .= ' WHERE id = :id';
+            $statement = $this->connection->prepare($query);
+            $statement->execute($params);
+
+            $this->connection->prepare(
+                'UPDATE ticket_metrics SET last_touch_at = :now WHERE ticket_id = :ticket_id'
+            )->execute([
+                'now' => $now,
+                'ticket_id' => $ticketId,
+            ]);
+        }
+
+        $ticket = $this->fetchTicketStatus($ticketId);
+
+        $this->logger->info('ticket.status_changed', [
+            'ticket_id' => $ticketId,
+            'status' => $ticket['status'] ?? $status,
+            'user_id' => $actorId,
+        ]);
+
+        return $ticket;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function fetchTicketStatus(int $ticketId): array
+    {
+        $statement = $this->connection->prepare(
+            'SELECT t.id, t.status, t.closed_at, tm.sla_status, tm.sla_due_at '
+            . 'FROM tickets t LEFT JOIN ticket_metrics tm ON tm.ticket_id = t.id WHERE t.id = :id'
+        );
+        $statement->execute(['id' => $ticketId]);
+        $ticket = $statement->fetch(PDO::FETCH_ASSOC);
+
+        if (!$ticket) {
+            throw new RuntimeException('Ticket não encontrado.');
+        }
+
+        $ticketStatus = strtolower((string) ($ticket['status'] ?? Ticket::STATUS_OPEN));
+        $labels = [
+            Ticket::STATUS_OPEN => 'Aberto',
+            Ticket::STATUS_ASSIGNED => 'Em atendimento',
+            Ticket::STATUS_RESOLVED => 'Resolvido',
+            Ticket::STATUS_CLOSED => 'Encerrado',
+        ];
+
+        $ticket['status'] = $ticketStatus;
+        $ticket['label'] = $labels[$ticketStatus] ?? ucfirst($ticketStatus);
+
+        return $ticket;
+    }
+
+    /**
      * @param array<string, mixed> $ticket
      * @param array<int, array<string, mixed>> $dbMessages
      * @return array<int, array<string, mixed>>
