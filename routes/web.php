@@ -7,6 +7,8 @@ use App\Controllers\Admin\TemplateController as AdminTemplateController;
 use App\Controllers\Admin\TicketController as AdminTicketController;
 use App\Controllers\Admin\UserController as AdminUserController;
 use App\Controllers\Admin\WebhookController as AdminWebhookController;
+use App\Controllers\Admin\GroupController as AdminGroupController;
+use App\Controllers\Admin\ReportController as AdminReportController;
 use App\Controllers\Api\EvolutionController as ApiEvolutionController;
 use App\Controllers\Api\LogStreamController;
 use App\Controllers\AuthController;
@@ -29,6 +31,10 @@ return [
     ['POST', '/admin/templates', [AdminTemplateController::class, 'store']],
     ['POST', '/admin/templates/{id}', [AdminTemplateController::class, 'update']],
     ['POST', '/admin/templates/{id}/delete', [AdminTemplateController::class, 'destroy']],
+    ['GET', '/admin/groups', [AdminGroupController::class, 'index']],
+    ['POST', '/admin/groups/{id}/targets', [AdminGroupController::class, 'updateTargets']],
+    ['GET', '/admin/reports', [AdminReportController::class, 'index']],
+    ['GET', '/admin/reports/export', [AdminReportController::class, 'export']],
     ['GET', '/admin/logs', [AdminLogController::class, 'index']],
     ['GET', '/admin/webhook', [AdminWebhookController::class, 'index']],
     ['POST', '/admin/webhook', [AdminWebhookController::class, 'update']],
@@ -56,6 +62,7 @@ return [
     ['GET', '/tickets/today', [TicketController::class, 'today']],
     ['GET', '/tickets/{id}', [TicketController::class, 'show']],
     ['POST', '/tickets/{id}/assign', [TicketController::class, 'assign']],
+    ['POST', '/tickets/{id}/meta', [TicketController::class, 'updateMeta']],
     ['POST', '/tickets/native/start', [TicketController::class, 'startNativeConversation']],
     ['POST', '/tickets/{id}/messages', [TicketController::class, 'storeMessage']],
     ['GET', '/tickets/{id}/messages', [TicketController::class, 'messages']],

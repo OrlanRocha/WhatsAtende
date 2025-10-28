@@ -55,10 +55,27 @@ $workspaceTabs = [
     ['label' => 'Ticket #' . $ticketId, 'target' => '#ticket-workspace', 'active' => true, 'closable' => false],
 ];
 $pageTitle = 'Atendimento · Ticket #' . $ticketId;
+$supportGroups = $supportGroups ?? [];
+$userGroups = $userGroups ?? [];
+$seriousnessLabels = $seriousnessOptions ?? [
+    Ticket::SERIOUSNESS_INFORMATION => 'Informação',
+    Ticket::SERIOUSNESS_LOW => 'Baixa',
+    Ticket::SERIOUSNESS_MEDIUM => 'Média',
+    Ticket::SERIOUSNESS_HIGH => 'Alta',
+    Ticket::SERIOUSNESS_CRITICAL => 'Crítica',
+];
+$seriousnessKey = strtolower((string) ($ticket['seriousness'] ?? Ticket::SERIOUSNESS_INFORMATION));
+$seriousnessLabel = $seriousnessLabels[$seriousnessKey] ?? ucfirst($seriousnessKey);
 include base_path('app/Views/partials/layout-start.php');
 include base_path('app/Views/partials/topbar.php');
 ?>
-<div class="workspace workspace--split" id="ticket-workspace" data-ticket-id="<?= $ticketId ?>" data-sla-due="<?= htmlspecialchars((string) ($ticket['sla_due_at'] ?? '')) ?>">
+<div class="workspace workspace--split" id="ticket-workspace"
+     data-ticket-id="<?= $ticketId ?>"
+     data-sla-due="<?= htmlspecialchars((string) ($ticket['sla_due_at'] ?? '')) ?>"
+     data-support-groups='<?= htmlspecialchars(json_encode($supportGroups, JSON_UNESCAPED_UNICODE)) ?>'
+     data-user-groups='<?= htmlspecialchars(json_encode($userGroups, JSON_UNESCAPED_UNICODE)) ?>'
+     data-seriousness-options='<?= htmlspecialchars(json_encode($seriousnessLabels, JSON_UNESCAPED_UNICODE)) ?>'
+     data-current-seriousness="<?= htmlspecialchars($seriousnessKey) ?>">
     <?php if (!empty($status)): ?>
         <div class="alert alert-success shadow-sm" role="alert"><?= htmlspecialchars($status) ?></div>
     <?php endif; ?>
@@ -112,6 +129,8 @@ include base_path('app/Views/partials/topbar.php');
                         <span>Ticket #<?= htmlspecialchars((string) $ticketId) ?></span>
                         <span class="dot" aria-hidden="true"></span>
                         <span>Canal <?= htmlspecialchars((string) ($ticket['channel'] ?? 'whatsapp')) ?></span>
+                        <span class="dot" aria-hidden="true"></span>
+                        <span data-ticket-seriousness><?= htmlspecialchars($seriousnessLabel) ?></span>
                     </div>
                 </div>
             </div>
@@ -198,6 +217,41 @@ include base_path('app/Views/partials/topbar.php');
         </div>
     </section>
     <aside class="ticket-pane ticket-pane--context">
+        <section class="context-card" data-ticket-meta>
+            <header>
+                <h3>Detalhes do ticket</h3>
+            </header>
+            <div class="mb-3">
+                <label for="ticket-subject" class="form-label">Assunto</label>
+                <input type="text" class="form-control" id="ticket-subject" name="subject" value="<?= htmlspecialchars((string) ($ticket['subject'] ?? '')) ?>" placeholder="Defina um assunto para o atendimento" data-meta-subject>
+            </div>
+            <div class="mb-3">
+                <label for="ticket-seriousness" class="form-label">Seriedade</label>
+                <select id="ticket-seriousness" class="form-select" name="seriousness" data-meta-seriousness>
+                    <?php foreach ($seriousnessLabels as $key => $label): ?>
+                        <option value="<?= htmlspecialchars($key) ?>"<?= $key === $seriousnessKey ? ' selected' : '' ?>><?= htmlspecialchars($label) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label for="ticket-group" class="form-label">Grupo</label>
+                <select id="ticket-group" class="form-select" name="group_id" data-meta-group>
+                    <option value="">Sem grupo definido</option>
+                    <?php foreach ($supportGroups as $group): ?>
+                        <?php $groupId = (int) ($group['id'] ?? 0); ?>
+                        <option value="<?= htmlspecialchars((string) $groupId) ?>"<?= $groupId === (int) ($ticket['group_id'] ?? 0) ? ' selected' : '' ?>>
+                            <?= htmlspecialchars((string) ($group['name'] ?? 'Grupo')) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="d-flex justify-content-between align-items-center">
+                <span class="text-muted small" data-meta-feedback></span>
+                <button type="button" class="btn btn-outline-primary btn-sm" data-meta-save>
+                    <i class="bi bi-save"></i> Salvar detalhes
+                </button>
+            </div>
+        </section>
         <section class="context-card">
             <header>
                 <h3>Status do ticket</h3>

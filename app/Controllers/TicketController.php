@@ -21,16 +21,23 @@ class TicketController
 
     public function index(): void
     {
-        require_auth();
-        $queue = $this->ticketService->getOpenQueue();
+        $user = require_auth();
+        $userId = (int) ($user->id ?? 0);
+        $queue = $this->ticketService->getOpenQueue(null, $userId);
         $native = $this->ticketService->listNativeChats();
+        $groups = $this->ticketService->listGroups();
+        $userGroups = $userId > 0 ? $this->ticketService->getUserGroupIds($userId) : [];
 
         if (is_ajax()) {
             json_response([
                 'queue' => $queue,
                 'native' => $native,
+                'groups' => $groups,
+                'userGroups' => $userGroups,
             ]);
         }
+
+        $seriousnessOptions = $this->ticketService->seriousnessOptions();
 
         view('tickets/queue', [
             'queue' => $queue,
@@ -42,6 +49,9 @@ class TicketController
             'showAllLink' => false,
             'nativeChats' => $native,
             'nativeStartEndpoint' => '/tickets/native/start',
+            'supportGroups' => $groups,
+            'userGroups' => $userGroups,
+            'seriousnessOptions' => $seriousnessOptions,
         ]);
     }
 
@@ -51,6 +61,7 @@ class TicketController
 
         $status = filter_input(INPUT_GET, 'status', FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: null;
         $priority = filter_input(INPUT_GET, 'priority', FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: null;
+        $seriousness = filter_input(INPUT_GET, 'seriousness', FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: null;
         $search = filter_input(INPUT_GET, 'q', FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: null;
         $mine = filter_input(INPUT_GET, 'mine', FILTER_VALIDATE_BOOL);
         $excludeResolved = filter_input(INPUT_GET, 'hide_resolved', FILTER_VALIDATE_BOOL);
@@ -62,6 +73,9 @@ class TicketController
         if ($priority) {
             $filters['priority'] = $priority;
         }
+        if ($seriousness) {
+            $filters['seriousness'] = $seriousness;
+        }
         if ($search) {
             $filters['search'] = $search;
         }
@@ -70,6 +84,13 @@ class TicketController
         }
         if ($excludeResolved) {
             $filters['exclude'] = ['resolved', 'closed'];
+        }
+
+        if (!in_array($user->role ?? null, ['admin', 'dev'], true)) {
+            $groupIds = $this->ticketService->getUserGroupIds((int) $user->id);
+            if ($groupIds !== []) {
+                $filters['group'] = $groupIds;
+            }
         }
 
         $tickets = $this->ticketService->listTickets($filters);
@@ -104,18 +125,25 @@ class TicketController
 
     public function today(): void
     {
-        require_auth();
+        $user = require_auth();
 
         $today = new DateTimeImmutable('today');
-        $queue = $this->ticketService->getOpenQueue($today);
+        $userId = (int) ($user->id ?? 0);
+        $queue = $this->ticketService->getOpenQueue($today, $userId);
         $native = $this->ticketService->listNativeChats();
+        $groups = $this->ticketService->listGroups();
+        $userGroups = $userId > 0 ? $this->ticketService->getUserGroupIds($userId) : [];
 
         if (is_ajax()) {
             json_response([
                 'queue' => $queue,
                 'native' => $native,
+                'groups' => $groups,
+                'userGroups' => $userGroups,
             ]);
         }
+
+        $seriousnessOptions = $this->ticketService->seriousnessOptions();
 
         view('tickets/queue', [
             'queue' => $queue,
@@ -127,12 +155,15 @@ class TicketController
             'showAllLink' => true,
             'nativeChats' => $native,
             'nativeStartEndpoint' => '/tickets/native/start',
+            'supportGroups' => $groups,
+            'userGroups' => $userGroups,
+            'seriousnessOptions' => $seriousnessOptions,
         ]);
     }
 
     public function show(int $ticketId): void
     {
-        require_auth();
+        $user = require_auth();
         try {
             $ticket = $this->ticketService->getTicketWithMessages($ticketId);
         } catch (Throwable $exception) {
@@ -147,10 +178,17 @@ class TicketController
         }
 
         $templates = $this->ticketService->listMessageTemplates();
+        $groups = $this->ticketService->listGroups();
+        $userGroups = $this->ticketService->getUserGroupIds((int) ($user->id ?? 0));
+
+        $seriousnessOptions = $this->ticketService->seriousnessOptions();
 
         view('tickets/show', [
             'ticket' => $ticket,
             'templates' => $templates,
+            'supportGroups' => $groups,
+            'userGroups' => $userGroups,
+            'seriousnessOptions' => $seriousnessOptions,
         ]);
     }
 
@@ -176,6 +214,43 @@ class TicketController
         }
 
         redirect('/tickets/' . $ticketId);
+    }
+
+    public function updateMeta(int $ticketId): void
+    {
+        $user = require_auth();
+        if (!in_array($user->role ?? null, ['admin', 'dev', 'supervisor', 'agent'], true)) {
+            json_response(['message' => 'Acesso negado.'], 403);
+            return;
+        }
+
+        $payload = $this->getRequestPayload();
+        $subject = $payload['subject'] ?? $_POST['subject'] ?? null;
+        $seriousness = $payload['seriousness'] ?? $_POST['seriousness'] ?? null;
+        $groupId = $payload['group_id'] ?? $_POST['group_id'] ?? null;
+
+        try {
+            $meta = $this->ticketService->updateTicketMeta($ticketId, [
+                'subject' => $subject,
+                'seriousness' => $seriousness,
+                'group_id' => $groupId,
+            ], (int) $user->id);
+
+            json_response([
+                'message' => 'Detalhes do ticket atualizados.',
+                'meta' => $meta,
+            ]);
+        } catch (InvalidArgumentException $exception) {
+            json_response(['message' => $exception->getMessage()], 422);
+        } catch (Throwable $exception) {
+            $this->logger->error('ticket.meta_update_failed', [
+                'ticket_id' => $ticketId,
+                'user_id' => $user->id ?? null,
+                'error' => $exception->getMessage(),
+            ]);
+
+            json_response(['message' => 'Não foi possível atualizar o ticket.'], 500);
+        }
     }
 
     public function startNativeConversation(): void

@@ -27,6 +27,7 @@ class UserController
             'users' => $users,
             'roles' => $this->userService->listRoles(),
             'permissions' => $this->userService->listPermissions(),
+            'groups' => $this->userService->listGroups(),
             'status' => get_flash('admin_status'),
             'error' => get_flash('admin_error'),
         ]);
@@ -39,6 +40,7 @@ class UserController
         view('admin/users/form', [
             'roles' => $this->userService->listRoles(),
             'permissions' => $this->userService->listPermissions(),
+            'groups' => $this->userService->listGroups(),
             'errors' => get_flash('user_form_errors') ?? [],
             'old' => get_flash('user_form_old') ?? [],
             'action' => 'create',
@@ -58,6 +60,7 @@ class UserController
         $roleId = (int) ($_POST['role_id'] ?? 0);
         $active = isset($_POST['is_active']) ? (bool) (int) $_POST['is_active'] : true;
         $permissions = $this->collectPermissionsFromRequest();
+        $groups = $this->collectGroupsFromRequest();
 
         $errors = $this->validateUserForm($fullName, $email, $cpf, $password, $passwordConfirmation, true);
 
@@ -73,6 +76,7 @@ class UserController
                 'role_id' => $roleId,
                 'is_active' => $active ? 1 : 0,
                 'permissions' => $permissions,
+                'groups' => $groups,
                 'custom_permissions' => $_POST['custom_permissions'] ?? '',
             ], '/admin/users/create', $isAjax);
         }
@@ -86,6 +90,7 @@ class UserController
                 $roleId,
                 $active,
                 $permissions,
+                $groups,
                 (int) $admin->id
             );
         } catch (PDOException $exception) {
@@ -97,6 +102,7 @@ class UserController
                 'role_id' => $roleId,
                 'is_active' => $active ? 1 : 0,
                 'permissions' => $permissions,
+                'groups' => $groups,
                 'custom_permissions' => $_POST['custom_permissions'] ?? '',
             ], '/admin/users/create', $isAjax);
         }
@@ -126,6 +132,7 @@ class UserController
         view('admin/users/form', [
             'roles' => $this->userService->listRoles(),
             'permissions' => $this->userService->listPermissions(),
+            'groups' => $this->userService->listGroups(),
             'errors' => get_flash('user_form_errors') ?? [],
             'old' => get_flash('user_form_old') ?? $user,
             'action' => 'edit',
@@ -146,6 +153,7 @@ class UserController
         $roleId = (int) ($_POST['role_id'] ?? 0);
         $active = isset($_POST['is_active']) ? ((int) $_POST['is_active'] === 1) : true;
         $permissions = $this->collectPermissionsFromRequest();
+        $groups = $this->collectGroupsFromRequest();
 
         $errors = $this->validateUserForm($fullName, $email, $cpf, $password, $passwordConfirmation, false);
 
@@ -161,6 +169,7 @@ class UserController
                 'role_id' => $roleId,
                 'is_active' => $active,
                 'permissions' => $permissions,
+                'groups' => $groups,
                 'custom_permissions' => $_POST['custom_permissions'] ?? '',
             ], '/admin/users/' . $userId . '/edit', $isAjax);
         }
@@ -175,6 +184,7 @@ class UserController
                 $roleId,
                 $active,
                 $permissions,
+                $groups,
                 (int) $admin->id
             );
         } catch (PDOException $exception) {
@@ -186,6 +196,7 @@ class UserController
                 'role_id' => $roleId,
                 'is_active' => $active,
                 'permissions' => $permissions,
+                'groups' => $groups,
                 'custom_permissions' => $_POST['custom_permissions'] ?? '',
             ], '/admin/users/' . $userId . '/edit', $isAjax);
         }
@@ -254,6 +265,27 @@ class UserController
         }
 
         return $permissions;
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    private function collectGroupsFromRequest(): array
+    {
+        $groups = $_POST['groups'] ?? [];
+        if (!is_array($groups)) {
+            return [];
+        }
+
+        $normalized = [];
+        foreach ($groups as $groupId) {
+            $value = (int) $groupId;
+            if ($value > 0) {
+                $normalized[$value] = $value;
+            }
+        }
+
+        return array_values($normalized);
     }
 
     private function validateUserForm(

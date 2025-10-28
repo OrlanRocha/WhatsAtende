@@ -62,6 +62,23 @@ final class DatabaseBootstrapper
         'dev' => ['*'],
     ];
 
+    private const DEFAULT_GROUPS = [
+        [
+            'name' => 'Atendimento Inicial',
+            'slug' => 'atendimento-inicial',
+            'description' => 'Fila padrão para triagem de solicitações.',
+            'target_tma' => 5,
+            'target_tme' => 15,
+        ],
+        [
+            'name' => 'Suporte Nível 2',
+            'slug' => 'suporte-n2',
+            'description' => 'Fila especializada para escalonamento.',
+            'target_tma' => 10,
+            'target_tme' => 25,
+        ],
+    ];
+
     private static bool $bootstrapped = false;
 
     public static function ensure(PDO $connection): void
@@ -76,6 +93,8 @@ final class DatabaseBootstrapper
             self::ensurePermissions($connection);
             self::ensureAdminAccount($connection);
             self::ensureRolePermissions($connection);
+            self::ensureSupportGroups($connection);
+            self::ensureDefaultGroupAssignments($connection);
 
             self::$bootstrapped = true;
         } catch (Throwable $exception) {
@@ -251,6 +270,82 @@ final class DatabaseBootstrapper
         }
     }
 
+    private static function ensureSupportGroups(PDO $connection): void
+    {
+        $statement = $connection->prepare(
+            'INSERT INTO support_groups (name, slug, description) '
+            . 'VALUES (:name, :slug, :description) '
+            . 'ON DUPLICATE KEY UPDATE description = VALUES(description), updated_at = CURRENT_TIMESTAMP'
+        );
+
+        foreach (self::DEFAULT_GROUPS as $group) {
+            $statement->execute([
+                'name' => $group['name'],
+                'slug' => $group['slug'],
+                'description' => $group['description'],
+            ]);
+        }
+
+        $targetStatement = $connection->prepare(
+            'INSERT INTO support_group_targets (group_id, target_tma, target_tme, updated_by) '
+            . 'VALUES (:group_id, :target_tma, :target_tme, NULL) '
+            . 'ON DUPLICATE KEY UPDATE target_tma = VALUES(target_tma), target_tme = VALUES(target_tme), updated_at = CURRENT_TIMESTAMP'
+        );
+
+        $groupIds = self::lookupGroupIds($connection, array_column(self::DEFAULT_GROUPS, 'slug'));
+
+        foreach (self::DEFAULT_GROUPS as $group) {
+            $groupId = $groupIds[$group['slug']] ?? null;
+            if ($groupId === null) {
+                continue;
+            }
+
+            $targetStatement->execute([
+                'group_id' => $groupId,
+                'target_tma' => $group['target_tma'],
+                'target_tme' => $group['target_tme'],
+            ]);
+        }
+    }
+
+    private static function ensureDefaultGroupAssignments(PDO $connection): void
+    {
+        $groupIds = self::lookupGroupIds($connection, array_column(self::DEFAULT_GROUPS, 'slug'));
+        if ($groupIds === []) {
+            return;
+        }
+
+        $adminIds = self::lookupUserIdsByRole($connection, 'admin');
+        $agentIds = self::lookupUserIdsByRole($connection, 'agent');
+
+        if ($adminIds === [] && $agentIds === []) {
+            return;
+        }
+
+        $insert = $connection->prepare(
+            'INSERT IGNORE INTO user_groups (user_id, group_id, assigned_by) VALUES (:user_id, :group_id, NULL)'
+        );
+
+        foreach ($adminIds as $userId) {
+            foreach ($groupIds as $groupId) {
+                $insert->execute([
+                    'user_id' => $userId,
+                    'group_id' => $groupId,
+                ]);
+            }
+        }
+
+        $defaultGroup = $groupIds['atendimento-inicial'] ?? null;
+        if ($defaultGroup !== null) {
+            foreach ($agentIds as $userId) {
+                $insert->execute([
+                    'user_id' => $userId,
+                    'group_id' => $defaultGroup,
+                ]);
+            }
+        }
+    }
+
     /**
      * @param array<int, string> $names
      * @return array<int, int>
@@ -276,6 +371,49 @@ final class DatabaseBootstrapper
         }
 
         return array_values($map);
+    }
+
+    /**
+     * @param array<int, string> $slugs
+     * @return array<string, int>
+     */
+    private static function lookupGroupIds(PDO $connection, array $slugs): array
+    {
+        if ($slugs === []) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($slugs), '?'));
+        $statement = $connection->prepare(
+            "SELECT id, slug FROM support_groups WHERE slug IN ({$placeholders})"
+        );
+        $statement->execute($slugs);
+
+        $map = [];
+        while ($row = $statement->fetch(PDO::FETCH_ASSOC)) {
+            if (!isset($row['slug'], $row['id'])) {
+                continue;
+            }
+            $map[$row['slug']] = (int) $row['id'];
+        }
+
+        return $map;
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    private static function lookupUserIdsByRole(PDO $connection, string $role): array
+    {
+        $roleId = self::lookupRoleId($connection, $role);
+        if ($roleId === null) {
+            return [];
+        }
+
+        $statement = $connection->prepare('SELECT id FROM users WHERE role_id = :role_id');
+        $statement->execute(['role_id' => $roleId]);
+
+        return array_map('intval', $statement->fetchAll(PDO::FETCH_COLUMN));
     }
 
     private static function lookupRoleId(PDO $connection, string $role): ?int

@@ -2,6 +2,7 @@
 /** @var array<int, array<string, mixed>> $users */
 /** @var string|null $status */
 /** @var string|null $error */
+/** @var array<int, array<string, mixed>> $groups */
 $breadcrumbs = [
     ['label' => 'Admin', 'href' => '/admin'],
     ['label' => 'Usuários'],
@@ -41,6 +42,7 @@ include base_path('app/Views/partials/topbar.php');
                         <th>Perfil</th>
                         <th>Ativo</th>
                         <th>Atribuídos</th>
+                        <th>Grupos</th>
                         <th>Permissões</th>
                         <th class="text-end">Ações</th>
                     </tr>
@@ -61,6 +63,19 @@ include base_path('app/Views/partials/topbar.php');
                                 <?php endif; ?>
                             </td>
                             <td><?= (int) ($user['assigned_tickets'] ?? 0) ?></td>
+                            <td>
+                                <?php if (!empty($user['groups'])): ?>
+                                    <div class="d-flex flex-wrap gap-1">
+                                        <?php foreach ($user['groups'] as $group): ?>
+                                            <span class="badge rounded-pill text-bg-primary-subtle text-primary">
+                                                <?= htmlspecialchars((string) ($group['name'] ?? '')) ?>
+                                            </span>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php else: ?>
+                                    <span class="text-muted small">—</span>
+                                <?php endif; ?>
+                            </td>
                             <td>
                                 <?php if (!empty($user['permissions'])): ?>
                                     <div class="d-flex flex-wrap gap-1">
@@ -167,6 +182,31 @@ include base_path('app/Views/partials/topbar.php');
                                 <?php endforeach; ?>
                             </div>
                             <small class="text-muted d-block mt-1">Combine permissões específicas além do perfil principal do usuário.</small>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Grupos de atendimento</label>
+                            <div class="d-flex flex-wrap gap-3" data-groups-list>
+                                <?php foreach ($groups ?? [] as $group): ?>
+                                    <?php $groupId = (int) ($group['id'] ?? 0); ?>
+                                    <div class="form-check form-check-inline align-items-start">
+                                        <input
+                                            class="form-check-input"
+                                            type="checkbox"
+                                            value="<?= $groupId ?>"
+                                            id="modal-group-<?= $groupId ?>"
+                                            name="groups[]"
+                                            data-group-checkbox
+                                        >
+                                        <label class="form-check-label" for="modal-group-<?= $groupId ?>">
+                                            <span class="fw-semibold d-block"><?= htmlspecialchars((string) ($group['name'] ?? '')) ?></span>
+                                            <?php if (!empty($group['description'])): ?>
+                                                <small class="text-muted"><?= htmlspecialchars((string) $group['description']) ?></small>
+                                            <?php endif; ?>
+                                        </label>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                            <small class="text-muted d-block mt-1">Selecione as filas visíveis para este usuário.</small>
                         </div>
                         <div class="col-12">
                             <label class="form-label" for="user_custom_permissions">Permissões personalizadas</label>

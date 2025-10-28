@@ -101,12 +101,16 @@ const renderSlaBadge = (ticket) => {
     return '<span class="status-badge">Sem SLA</span>';
 };
 
-const formatKanbanCard = (ticket) => {
+const formatKanbanCard = (ticket, seriousnessMap = {}) => {
+    const seriousnessKey = String(ticket?.seriousness ?? 'information').toLowerCase();
+    const seriousnessLabel = seriousnessMap[seriousnessKey] || seriousnessKey;
+    const groupLabel = ticket?.group_name ? escapeHtml(ticket.group_name) : 'Sem grupo';
     return `
         <article class="template-card">
             <div class="template-card__content">
                 <h4>#${escapeHtml(String(ticket.id ?? ''))}</h4>
                 <p class="mb-1">${escapeHtml(ticket.contact_name ?? 'Contato')}</p>
+                <p class="text-muted small mb-1">${groupLabel} · ${escapeHtml(seriousnessLabel)}</p>
                 <small class="text-muted">${renderOpenedAt(ticket)}</small>
             </div>
             <div class="template-card__actions">
@@ -191,7 +195,7 @@ const updateMetrics = (container, summary = {}) => {
     });
 };
 
-const renderQueueTable = (table, queue = []) => {
+const renderQueueTable = (table, queue = [], options = {}) => {
     if (!table) {
         return;
     }
@@ -199,12 +203,17 @@ const renderQueueTable = (table, queue = []) => {
     if (!tbody) {
         return;
     }
-    tbody.innerHTML = queue.map((ticket) => `
+    const seriousnessMap = options?.seriousness ?? {};
+
+    tbody.innerHTML = queue.map((ticket) => {
+        const seriousnessKey = String(ticket?.seriousness ?? 'information').toLowerCase();
+        const seriousnessLabel = seriousnessMap[seriousnessKey] || seriousnessKey;
+        return `
         <tr>
             <td class="fw-semibold">#${escapeHtml(String(ticket.id ?? ''))}</td>
             <td>
                 <div class="d-flex align-items-center gap-2">
-                    <span class="presence-indicator" data-presence="${ticket?.presence ?? 'offline'}" aria-hidden="true"></span>
+                    <span class="presence-indicator" data-presence="${escapeHtml(ticket?.presence ?? 'offline')}" aria-hidden="true"></span>
                     <div>
                         <div class="fw-semibold">${escapeHtml(ticket.contact_name ?? 'Contato')}</div>
                         <small class="text-muted">${escapeHtml(ticket.channel ?? 'whatsapp')}</small>
@@ -212,6 +221,8 @@ const renderQueueTable = (table, queue = []) => {
                 </div>
             </td>
             <td>${escapeHtml(ticket.channel ?? 'whatsapp')}</td>
+            <td>${escapeHtml(ticket.group_name ?? 'Sem grupo')}</td>
+            <td><span class="badge bg-secondary-subtle text-secondary" data-seriousness="${escapeHtml(seriousnessKey)}">${escapeHtml(seriousnessLabel)}</span></td>
             <td><span class="status-badge status-badge--${escapeHtml(ticket.status ?? 'open')}">${escapeHtml(ticket.status ?? 'open')}</span></td>
             <td>${renderSlaBadge(ticket)}</td>
             <td>${renderOpenedAt(ticket)}</td>
@@ -220,11 +231,11 @@ const renderQueueTable = (table, queue = []) => {
                     <i class="bi bi-headset"></i> Iniciar
                 </button>
             </td>
-        </tr>
-    `).join('');
+        </tr>`;
+    }).join('');
 };
 
-const renderKanban = (board, tickets = []) => {
+const renderKanban = (board, tickets = [], options = {}) => {
     if (!board) {
         return;
     }
@@ -238,7 +249,7 @@ const renderKanban = (board, tickets = []) => {
         if (!target) {
             return;
         }
-        target.insertAdjacentHTML('beforeend', formatKanbanCard(ticket));
+        target.insertAdjacentHTML('beforeend', formatKanbanCard(ticket, options?.seriousness));
     });
 };
 
@@ -262,6 +273,23 @@ export function initQueue(selector, endpoint, nativeConfig = {}) {
     const savedFilters = container.querySelectorAll('[data-saved-filter]');
     const densityToggle = container.querySelector('[data-density-toggle]');
     const searchInput = container.querySelector('[data-queue-search]');
+    const groupFilter = container.querySelector('[data-group-filter]');
+    const seriousnessFilter = container.querySelector('[data-seriousness-filter]');
+
+    const parseJson = (value, fallback) => {
+        if (!value) {
+            return fallback;
+        }
+        try {
+            return JSON.parse(value);
+        } catch (error) {
+            return fallback;
+        }
+    };
+
+    let supportGroups = parseJson(container.getAttribute('data-support-groups'), []);
+    let userGroups = parseJson(container.getAttribute('data-user-groups'), []);
+    const seriousnessOptions = parseJson(container.getAttribute('data-seriousness-options'), {});
 
     const nativeState = {
         enabled: !!(nativeConfig?.enabled),
@@ -275,7 +303,16 @@ export function initQueue(selector, endpoint, nativeConfig = {}) {
         mine: false,
         hide_resolved: true,
         search: '',
+        group: null,
+        seriousness: null,
     };
+
+    if (!queueState.group && Array.isArray(userGroups) && userGroups.length === 1) {
+        queueState.group = userGroups[0];
+        if (groupFilter) {
+            groupFilter.value = String(userGroups[0]);
+        }
+    }
 
     const renderNative = () => {
         if (!nativeContainer) {
@@ -353,6 +390,14 @@ export function initQueue(selector, endpoint, nativeConfig = {}) {
                 queueState.status = payload.status ?? null;
                 queueState.mine = Boolean(payload.mine);
                 queueState.hide_resolved = payload.hide_resolved !== false;
+                queueState.group = payload.group ?? queueState.group;
+                queueState.seriousness = payload.seriousness ?? queueState.seriousness;
+                if (groupFilter && payload.group) {
+                    groupFilter.value = String(payload.group);
+                }
+                if (seriousnessFilter && payload.seriousness) {
+                    seriousnessFilter.value = String(payload.seriousness);
+                }
             } catch (error) {
                 // ignore invalid payloads
             }
@@ -371,11 +416,23 @@ export function initQueue(selector, endpoint, nativeConfig = {}) {
         searchInput.dataset.timeoutId = String(timeoutId);
     });
 
+    groupFilter?.addEventListener('change', () => {
+        const value = groupFilter.value;
+        queueState.group = value ? Number(value) : null;
+        fetchQueue();
+    });
+
+    seriousnessFilter?.addEventListener('change', () => {
+        const value = seriousnessFilter.value;
+        queueState.seriousness = value || null;
+        fetchQueue();
+    });
+
     const fetchQueue = async () => {
         try {
             const queueResponse = await request(endpoint, { method: 'GET' });
             const tableData = queueResponse?.queue ?? [];
-            renderQueueTable(table, tableData);
+            renderQueueTable(table, tableData, { seriousness: seriousnessOptions });
             hydrateAvatars(table);
             initTable(table);
             if (queueResponse?.native) {
@@ -383,6 +440,33 @@ export function initQueue(selector, endpoint, nativeConfig = {}) {
                 nativeState.error = queueResponse.native.error ?? null;
                 nativeState.enabled = queueResponse.native.enabled ?? nativeState.enabled;
                 renderNative();
+            }
+            if (Array.isArray(queueResponse?.groups)) {
+                supportGroups = queueResponse.groups;
+                if (groupFilter) {
+                    const current = groupFilter.value;
+                    groupFilter.innerHTML = '<option value="">Todos os grupos</option>';
+                    supportGroups.forEach((group) => {
+                        const option = document.createElement('option');
+                        option.value = String(group?.id ?? '');
+                        option.textContent = group?.name ?? option.value;
+                        groupFilter.appendChild(option);
+                    });
+                    if (queueState.group) {
+                        groupFilter.value = String(queueState.group);
+                    } else {
+                        groupFilter.value = current;
+                    }
+                }
+            }
+            if (Array.isArray(queueResponse?.userGroups)) {
+                userGroups = queueResponse.userGroups;
+                if (!queueState.group && userGroups.length === 1) {
+                    queueState.group = userGroups[0];
+                    if (groupFilter) {
+                        groupFilter.value = String(userGroups[0]);
+                    }
+                }
             }
         } catch (error) {
             showToast('Não foi possível atualizar a fila.', 'error');
@@ -402,13 +486,19 @@ export function initQueue(selector, endpoint, nativeConfig = {}) {
             if (queueState.search) {
                 params.set('q', queueState.search);
             }
+            if (queueState.group) {
+                params.set('group', String(queueState.group));
+            }
+            if (queueState.seriousness) {
+                params.set('seriousness', queueState.seriousness);
+            }
             params.set('format', 'json');
             const overview = await request(`/tickets/overview?${params.toString()}`);
             updateMetrics(metrics, overview?.summary ?? {});
-            renderKanban(kanbanBoard, overview?.tickets ?? []);
+            renderKanban(kanbanBoard, overview?.tickets ?? [], { seriousness: seriousnessOptions });
         } catch (error) {
             updateMetrics(metrics, {});
-            renderKanban(kanbanBoard, []);
+            renderKanban(kanbanBoard, [], { seriousness: seriousnessOptions });
         }
     };
 

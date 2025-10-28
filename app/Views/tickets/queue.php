@@ -17,10 +17,22 @@ $workspaceTabs = $workspaceTabs ?? [
     ['label' => 'Tickets', 'target' => '#queue-pane', 'active' => true],
 ];
 $pageTitle = 'Fila de Chamados · WhatsAtende';
+$supportGroups = $supportGroups ?? [];
+$userGroups = $userGroups ?? [];
+$seriousnessLabels = $seriousnessOptions ?? [
+    'information' => 'Informação',
+    'low' => 'Baixa',
+    'medium' => 'Média',
+    'high' => 'Alta',
+    'critical' => 'Crítica',
+];
 include base_path('app/Views/partials/layout-start.php');
 include base_path('app/Views/partials/topbar.php');
 ?>
-<div class="workspace" id="<?= htmlspecialchars($pageId) ?>">
+<div class="workspace" id="<?= htmlspecialchars($pageId) ?>"
+     data-support-groups='<?= htmlspecialchars(json_encode($supportGroups, JSON_UNESCAPED_UNICODE)) ?>'
+     data-user-groups='<?= htmlspecialchars(json_encode($userGroups, JSON_UNESCAPED_UNICODE)) ?>'
+     data-seriousness-options='<?= htmlspecialchars(json_encode($seriousnessLabels, JSON_UNESCAPED_UNICODE)) ?>'>
     <?php if (!empty($status) || !empty($error)): ?>
         <div class="alert-stack" role="status">
             <?php if (!empty($status)): ?>
@@ -63,6 +75,20 @@ include base_path('app/Views/partials/topbar.php');
                 <i class="bi bi-search"></i>
                 <input type="search" placeholder="Pesquisar ticket ou contato" data-queue-search>
             </div>
+            <select class="form-select form-select-sm" data-group-filter>
+                <option value="">Todos os grupos</option>
+                <?php foreach ($supportGroups as $group): ?>
+                    <option value="<?= htmlspecialchars((string) ($group['id'] ?? '')) ?>">
+                        <?= htmlspecialchars((string) ($group['name'] ?? '')) ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+            <select class="form-select form-select-sm" data-seriousness-filter>
+                <option value="">Todas as seriedades</option>
+                <?php foreach ($seriousnessLabels as $key => $label): ?>
+                    <option value="<?= htmlspecialchars($key) ?>"><?= htmlspecialchars($label) ?></option>
+                <?php endforeach; ?>
+            </select>
             <button type="button" class="btn btn-outline-secondary btn-sm" data-density-toggle>
                 <i class="bi bi-view-stacked"></i><span class="d-none d-lg-inline"> Compactar</span>
             </button>
@@ -109,6 +135,8 @@ include base_path('app/Views/partials/topbar.php');
                         <th>Protocolo</th>
                         <th>Contato</th>
                         <th>Canal</th>
+                        <th>Grupo</th>
+                        <th>Seriedade</th>
                         <th>Status</th>
                         <th>SLA</th>
                         <th>Aberto em</th>
@@ -117,6 +145,10 @@ include base_path('app/Views/partials/topbar.php');
                     </thead>
                     <tbody>
                     <?php foreach ($queue as $ticket): ?>
+                        <?php
+                        $seriousnessKey = strtolower((string) ($ticket['seriousness'] ?? 'information'));
+                        $seriousnessLabel = $seriousnessLabels[$seriousnessKey] ?? ucfirst($seriousnessKey);
+                        ?>
                         <tr>
                             <td class="fw-semibold">#<?= htmlspecialchars((string) ($ticket['id'] ?? '')) ?></td>
                             <td>
@@ -129,6 +161,12 @@ include base_path('app/Views/partials/topbar.php');
                                 </div>
                             </td>
                             <td><?= htmlspecialchars((string) ($ticket['channel'] ?? 'whatsapp')) ?></td>
+                            <td><?= htmlspecialchars((string) ($ticket['group_name'] ?? 'Sem grupo')) ?></td>
+                            <td>
+                                <span class="badge bg-secondary-subtle text-secondary" data-seriousness="<?= htmlspecialchars($seriousnessKey) ?>">
+                                    <?= htmlspecialchars($seriousnessLabel) ?>
+                                </span>
+                            </td>
                             <td><span class="status-badge status-badge--<?= htmlspecialchars((string) ($ticket['status'] ?? 'open')) ?>"><?= htmlspecialchars((string) ($ticket['status'] ?? 'open')) ?></span></td>
                             <td><span class="sla-badge" data-sla="ok">Em dia</span></td>
                             <td>

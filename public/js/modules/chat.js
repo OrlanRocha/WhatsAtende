@@ -336,6 +336,18 @@ export function initChat(selector) {
     const slaPanel = container;
     const statusTrack = container.querySelector('[data-status-track]');
     const statusSteps = statusTrack ? Array.from(statusTrack.querySelectorAll('[data-status-step]')) : [];
+    const metaSubject = container.querySelector('[data-meta-subject]');
+    const metaSeriousness = container.querySelector('[data-meta-seriousness]');
+    const metaGroup = container.querySelector('[data-meta-group]');
+    const metaSave = container.querySelector('[data-meta-save]');
+    const metaFeedback = container.querySelector('[data-meta-feedback]');
+    const seriousnessBadge = container.querySelector('[data-ticket-seriousness]');
+    let seriousnessOptions = {};
+    try {
+        seriousnessOptions = JSON.parse(container.getAttribute('data-seriousness-options') || '{}');
+    } catch (error) {
+        seriousnessOptions = {};
+    }
     const statusLabels = {
         open: 'Aberto',
         assigned: 'Em atendimento',
@@ -382,6 +394,15 @@ export function initChat(selector) {
         updateStatusTrack(status);
     };
 
+    const updateSeriousnessBadge = (key) => {
+        if (!seriousnessBadge) {
+            return;
+        }
+        const normalized = String(key || '').toLowerCase();
+        const label = seriousnessOptions[normalized] || normalized || 'Informação';
+        seriousnessBadge.textContent = label;
+    };
+
     const draftKey = `whats-ticket-draft-${ticketId}`;
     if (input) {
         const storedDraft = localStorage.getItem(draftKey);
@@ -397,6 +418,11 @@ export function initChat(selector) {
     persistNotes(notes, ticketId);
     applySlaStatus(slaPanel);
     applyStatusState(currentStatus, statusBadge?.textContent ?? statusLabels[currentStatus]);
+    updateSeriousnessBadge(container.getAttribute('data-current-seriousness'));
+
+    metaSeriousness?.addEventListener('change', () => {
+        updateSeriousnessBadge(metaSeriousness.value);
+    });
 
     statusTrack?.addEventListener('click', async (event) => {
         const target = event.target instanceof HTMLElement ? event.target.closest('[data-status-step]') : null;
@@ -434,6 +460,58 @@ export function initChat(selector) {
             showToast(message, 'error');
         } finally {
             statusTrack.classList.remove('is-busy');
+        }
+    });
+
+    metaSave?.addEventListener('click', async () => {
+        if (!ticketId) {
+            showToast('Ticket não identificado.', 'error');
+            return;
+        }
+
+        metaSave.disabled = true;
+        if (metaFeedback) {
+            metaFeedback.textContent = 'Salvando...';
+        }
+
+        try {
+            const payload = {
+                subject: metaSubject?.value ?? '',
+                seriousness: metaSeriousness?.value ?? '',
+                group_id: metaGroup?.value ?? '',
+            };
+            const response = await request(`/tickets/${ticketId}/meta`, {
+                method: 'POST',
+                body: payload,
+            });
+            const message = response?.message || 'Detalhes do ticket atualizados.';
+            showToast(message);
+            if (metaFeedback) {
+                metaFeedback.textContent = message;
+                window.setTimeout(() => {
+                    metaFeedback.textContent = '';
+                }, 4000);
+            }
+            if (response?.meta?.seriousness) {
+                updateSeriousnessBadge(response.meta.seriousness);
+                if (metaSeriousness) {
+                    metaSeriousness.value = response.meta.seriousness;
+                }
+            }
+            if (response?.meta?.subject !== undefined && metaSubject) {
+                metaSubject.value = response.meta.subject ?? '';
+            }
+            if (response?.meta?.group_id !== undefined && metaGroup) {
+                metaGroup.value = response.meta.group_id ? String(response.meta.group_id) : '';
+            }
+        } catch (error) {
+            const message = error?.data?.message || 'Não foi possível atualizar os detalhes do ticket.';
+            showToast(message, 'error');
+            if (metaFeedback) {
+                metaFeedback.textContent = message;
+            }
+        } finally {
+            metaSave.disabled = false;
         }
     });
 

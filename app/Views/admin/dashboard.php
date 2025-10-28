@@ -13,6 +13,17 @@ include base_path('app/Views/partials/layout-start.php');
 include base_path('app/Views/partials/topbar.php');
 ?>
 <div class="workspace" id="dashboard" data-dashboard>
+    <section class="workspace-header">
+        <div>
+            <h1 class="workspace-title">Visão operacional</h1>
+            <p class="workspace-subtitle">Acompanhe indicadores chave, canais ativos e desempenho por equipe.</p>
+        </div>
+        <div class="workspace-actions">
+            <button type="button" class="btn btn-outline-secondary" data-group-targets-trigger>
+                <i class="bi bi-sliders"></i> Metas TMA/TME
+            </button>
+        </div>
+    </section>
     <div class="row g-3 mb-4">
         <div class="col-sm-6 col-xl-3">
             <div class="card kpi-card shadow-sm border-0" data-kpi="open">
@@ -162,6 +173,46 @@ include base_path('app/Views/partials/topbar.php');
                     <?php endforeach; ?>
                     </tbody>
                 </table>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="modal fade" id="groupTargetsModal" tabindex="-1" aria-labelledby="groupTargetsLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header">
+                <div>
+                    <h5 class="modal-title" id="groupTargetsLabel">Metas de atendimento por grupo</h5>
+                    <p class="text-muted mb-0">Defina os objetivos de TMA (tempo médio de atendimento) e TME (tempo médio de espera) por fila.</p>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-danger d-none" role="alert" data-group-feedback></div>
+                <div class="d-flex justify-content-center py-4 d-none" data-group-loading>
+                    <div class="spinner-border" role="status" aria-hidden="true"></div>
+                </div>
+                <div class="table-responsive" data-group-table>
+                    <table class="table align-middle">
+                        <thead>
+                        <tr>
+                            <th>Grupo</th>
+                            <th width="160">TMA alvo (min)</th>
+                            <th width="160">TME alvo (min)</th>
+                            <th>Atualizado em</th>
+                            <th class="text-end">Ações</th>
+                        </tr>
+                        </thead>
+                        <tbody data-group-list>
+                        <tr data-group-empty>
+                            <td colspan="5" class="text-center text-muted">Carregando grupos de atendimento...</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Fechar</button>
             </div>
         </div>
     </div>

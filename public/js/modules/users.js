@@ -18,6 +18,7 @@ export function initUserModal(modalSelector, formSelector) {
     const methodField = form.querySelector('#user-form-method');
     const permissionInputs = Array.from(form.querySelectorAll('[data-permission-checkbox]'));
     const customPermissionsInput = form.querySelector('#user_custom_permissions');
+    const groupInputs = Array.from(form.querySelectorAll('[data-group-checkbox]'));
 
     const resetPermissions = () => {
         permissionInputs.forEach((checkbox) => {
@@ -28,10 +29,17 @@ export function initUserModal(modalSelector, formSelector) {
         }
     };
 
+    const resetGroups = () => {
+        groupInputs.forEach((checkbox) => {
+            checkbox.checked = false;
+        });
+    };
+
     modalElement.addEventListener('show.bs.modal', (event) => {
         const trigger = event.relatedTarget;
         const mode = trigger?.getAttribute('data-mode') || 'create';
         resetPermissions();
+        resetGroups();
         if (mode === 'edit') {
             const row = trigger.closest('[data-user-row]');
             if (!row) {
@@ -84,6 +92,32 @@ export function initUserModal(modalSelector, formSelector) {
             if (customPermissionsInput) {
                 customPermissionsInput.value = extras.join(', ');
             }
+
+            const knownGroups = new Map();
+            groupInputs.forEach((input) => {
+                knownGroups.set(Number.parseInt(input.value, 10), input);
+            });
+            const groupIds = Array.isArray(user.group_ids)
+                ? user.group_ids.map((value) => Number.parseInt(value, 10)).filter((value) => Number.isInteger(value))
+                : Array.isArray(user.groups)
+                ? user.groups
+                      .map((group) => {
+                          if (typeof group === 'number') {
+                              return group;
+                          }
+                          if (group && typeof group === 'object' && 'id' in group) {
+                              return Number.parseInt(group.id, 10);
+                          }
+                          return null;
+                      })
+                      .filter((value) => Number.isInteger(value))
+                : [];
+            groupIds.forEach((groupId) => {
+                const checkbox = knownGroups.get(groupId);
+                if (checkbox) {
+                    checkbox.checked = true;
+                }
+            });
             if (modalTitle) {
                 modalTitle.textContent = 'Editar usuário';
             }
@@ -127,6 +161,15 @@ export async function refreshUserTable(tableSelector, endpoint) {
             const userJson = escapeHtml(JSON.stringify(user));
             const badge = user.is_active ? '<span class="badge rounded-pill text-bg-success"><i class="bi bi-check-circle"></i> Sim</span>' : '<span class="badge rounded-pill text-bg-danger"><i class="bi bi-x-circle"></i> Não</span>';
             const permissions = Array.isArray(user.permissions) ? user.permissions : [];
+            const groups = Array.isArray(user.groups) ? user.groups : [];
+            const groupBadges = groups.length
+                ? `<div class="d-flex flex-wrap gap-1">${groups
+                      .map((group) => {
+                          const label = typeof group === 'string' ? group : group?.name || group?.slug || '';
+                          return `<span class="badge rounded-pill text-bg-primary-subtle text-primary">${escapeHtml(label)}</span>`;
+                      })
+                      .join('')}</div>`
+                : '<span class="text-muted small">—</span>';
             const permissionBadges = permissions.length
                 ? `<div class="d-flex flex-wrap gap-1">${permissions
                       .map((permission) => {
@@ -144,6 +187,7 @@ export async function refreshUserTable(tableSelector, endpoint) {
                     <td><span class="badge bg-gradient text-capitalize">${escapeHtml(user.role)}</span></td>
                     <td>${badge}</td>
                     <td>${user.assigned_tickets ?? 0}</td>
+                    <td>${groupBadges}</td>
                     <td>${permissionBadges}</td>
                     <td class="text-end">
                         <div class="btn-group" role="group">

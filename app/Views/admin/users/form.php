@@ -1,6 +1,7 @@
 <?php
 /** @var array<int, array<string, mixed>> $roles */
 /** @var array<int, array<string, mixed>> $permissions */
+/** @var array<int, array<string, mixed>> $groups */
 /** @var array<int, string> $errors */
 /** @var array<string, mixed> $old */
 /** @var string $action */
@@ -19,6 +20,20 @@ $selectedPermissions = array_map('strval', $old['permissions'] ?? []);
 $customPermissions = (string) ($old['custom_permissions'] ?? '');
 $selectedRoleId = (int) ($old['role_id'] ?? ($old['role'] ?? 0));
 $isActiveValue = array_key_exists('is_active', $old) ? (bool) (int) $old['is_active'] : true;
+$availableGroups = $groups ?? [];
+$selectedGroups = [];
+if (!empty($old['group_ids']) && is_array($old['group_ids'])) {
+    $selectedGroups = array_map('intval', $old['group_ids']);
+} elseif (!empty($old['groups']) && is_array($old['groups'])) {
+    foreach ($old['groups'] as $group) {
+        if (is_array($group) && isset($group['id'])) {
+            $selectedGroups[] = (int) $group['id'];
+        } elseif (is_scalar($group)) {
+            $selectedGroups[] = (int) $group;
+        }
+    }
+}
+$selectedGroups = array_values(array_unique(array_filter($selectedGroups, static fn ($value) => $value > 0)));
 
 include base_path('app/Views/partials/layout-start.php');
 include base_path('app/Views/partials/topbar.php');
@@ -96,6 +111,31 @@ include base_path('app/Views/partials/topbar.php');
                             <?php endforeach; ?>
                         </div>
                         <small class="text-muted d-block mt-1">Selecione permissões adicionais específicas para este usuário.</small>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Grupos de atendimento</label>
+                        <div class="d-flex flex-wrap gap-3">
+                            <?php foreach ($availableGroups as $group): ?>
+                                <?php $groupId = (int) ($group['id'] ?? 0); ?>
+                                <div class="form-check form-check-inline align-items-start">
+                                    <input
+                                        class="form-check-input"
+                                        type="checkbox"
+                                        value="<?= $groupId ?>"
+                                        id="group-form-<?= $groupId ?>"
+                                        name="groups[]"
+                                        <?= in_array($groupId, $selectedGroups, true) ? 'checked' : '' ?>
+                                    >
+                                    <label class="form-check-label" for="group-form-<?= $groupId ?>">
+                                        <span class="fw-semibold d-block"><?= htmlspecialchars((string) ($group['name'] ?? '')) ?></span>
+                                        <?php if (!empty($group['description'])): ?>
+                                            <small class="text-muted"><?= htmlspecialchars((string) $group['description']) ?></small>
+                                        <?php endif; ?>
+                                    </label>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <small class="text-muted d-block mt-1">Defina as filas e grupos em que este usuário pode atuar.</small>
                     </div>
                     <div class="col-12">
                         <label class="form-label" for="custom_permissions">Permissões personalizadas</label>

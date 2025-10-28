@@ -17,20 +17,74 @@ class TicketService
         private PDO $connection,
         private LoggerService $logger,
         private SettingService $settings,
-        private EvolutionService $evolution
+        private EvolutionService $evolution,
+        private GroupService $groups
     ) {
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function seriousnessOptions(): array
+    {
+        return [
+            Ticket::SERIOUSNESS_INFORMATION => 'Informação',
+            Ticket::SERIOUSNESS_LOW => 'Baixa',
+            Ticket::SERIOUSNESS_MEDIUM => 'Média',
+            Ticket::SERIOUSNESS_HIGH => 'Alta',
+            Ticket::SERIOUSNESS_CRITICAL => 'Crítica',
+        ];
     }
 
     /**
      * @return array<int, array<string, mixed>>
      */
-    public function getOpenQueue(?DateTimeImmutable $openedDate = null): array
+    public function listGroups(): array
     {
-        $sql = 'SELECT t.*, c.display_name AS contact_name FROM tickets t'
+        return $this->groups->listGroups();
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    public function getUserGroupIds(int $userId): array
+    {
+        return $this->groups->getUserGroupIds($userId);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getOpenQueue(?DateTimeImmutable $openedDate = null, ?int $userId = null): array
+    {
+        $sql = 'SELECT t.*, c.display_name AS contact_name, sg.name AS group_name, sg.slug AS group_slug '
+            . 'FROM tickets t'
             . ' INNER JOIN contacts c ON c.id = t.contact_id'
+            . ' LEFT JOIN support_groups sg ON sg.id = t.group_id'
             . ' WHERE t.status = :status';
 
         $params = ['status' => Ticket::STATUS_OPEN];
+
+        if ($userId !== null) {
+            $groupIds = $this->groups->getUserGroupIds($userId);
+            if ($groupIds === []) {
+                $default = $this->groups->defaultGroupId();
+                if ($default !== null) {
+                    $groupIds = [$default];
+                }
+            }
+
+            if (!empty($groupIds)) {
+                $placeholders = [];
+                foreach ($groupIds as $index => $groupId) {
+                    $key = 'group_' . $index;
+                    $placeholders[] = ':' . $key;
+                    $params[$key] = $groupId;
+                }
+                $sql .= ' AND t.group_id IN (' . implode(',', $placeholders) . ')';
+            }
+        }
+
         if ($openedDate !== null) {
             $sql .= ' AND DATE(t.opened_at) = :opened_date';
             $params['opened_date'] = $openedDate->format('Y-m-d');
@@ -40,7 +94,12 @@ class TicketService
 
         $stmt = $this->connection->prepare($sql);
         foreach ($params as $key => $value) {
-            $stmt->bindValue(':' . $key, $value);
+            $param = ':' . $key;
+            if (str_starts_with($key, 'group_')) {
+                $stmt->bindValue($param, (int) $value, PDO::PARAM_INT);
+                continue;
+            }
+            $stmt->bindValue($param, $value);
         }
         $stmt->execute();
 
@@ -59,6 +118,9 @@ class TicketService
                     // Ignore parse failures and keep opened_today as false.
                 }
             }
+
+            $row['group_name'] = $row['group_name'] ?? null;
+            $row['group_slug'] = $row['group_slug'] ?? null;
 
             return $row;
         }, $rows);
@@ -308,11 +370,13 @@ class TicketService
     public function getTicketWithMessages(int $ticketId): array
     {
         $stmt = $this->connection->prepare(
-            'SELECT t.*, c.display_name AS contact_name, c.external_id AS contact_external_id, au.full_name AS agent_name
-             FROM tickets t
-             INNER JOIN contacts c ON c.id = t.contact_id
-             LEFT JOIN users au ON au.id = t.assigned_user_id
-             WHERE t.id = :id'
+            'SELECT t.*, c.display_name AS contact_name, c.external_id AS contact_external_id, '
+            . 'au.full_name AS agent_name, sg.name AS group_name, sg.slug AS group_slug'
+            . ' FROM tickets t'
+            . ' INNER JOIN contacts c ON c.id = t.contact_id'
+            . ' LEFT JOIN users au ON au.id = t.assigned_user_id'
+            . ' LEFT JOIN support_groups sg ON sg.id = t.group_id'
+            . ' WHERE t.id = :id'
         );
         $stmt->execute(['id' => $ticketId]);
         $ticket = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -541,6 +605,101 @@ class TicketService
     /**
      * @return array<string, mixed>
      */
+    public function updateTicketMeta(int $ticketId, array $data, int $actorId): array
+    {
+        $before = $this->fetchTicketMeta($ticketId);
+
+        $fields = [];
+        $params = ['id' => $ticketId];
+        $changes = [];
+
+        if (array_key_exists('subject', $data)) {
+            $subject = $data['subject'];
+            if ($subject !== null) {
+                $subject = trim((string) $subject);
+                if ($subject === '') {
+                    $subject = null;
+                } else {
+                    $subject = mb_substr($subject, 0, 191);
+                }
+            }
+
+            $previous = $before['subject'] ?? null;
+            if ($subject !== $previous) {
+                $fields[] = 'subject = :subject';
+                $params['subject'] = $subject;
+                $changes['subject'] = ['from' => $previous, 'to' => $subject];
+            }
+        }
+
+        if (array_key_exists('seriousness', $data)) {
+            $seriousness = strtolower(trim((string) $data['seriousness']));
+            $allowedSeriousness = array_keys($this->seriousnessOptions());
+
+            if ($seriousness === '') {
+                $seriousness = Ticket::SERIOUSNESS_INFORMATION;
+            }
+
+            if (!in_array($seriousness, $allowedSeriousness, true)) {
+                throw new InvalidArgumentException('Nível de seriedade inválido.');
+            }
+
+            $previousSeriousness = strtolower((string) ($before['seriousness'] ?? Ticket::SERIOUSNESS_INFORMATION));
+            if ($seriousness !== $previousSeriousness) {
+                $fields[] = 'seriousness = :seriousness';
+                $params['seriousness'] = $seriousness;
+                $changes['seriousness'] = ['from' => $previousSeriousness, 'to' => $seriousness];
+            }
+        }
+
+        if (array_key_exists('group_id', $data)) {
+            $groupId = $data['group_id'];
+            if ($groupId === '' || $groupId === null) {
+                $groupId = null;
+            }
+
+            if ($groupId !== null) {
+                $groupId = (int) $groupId;
+                if ($groupId <= 0 || !$this->groups->groupExists($groupId)) {
+                    throw new InvalidArgumentException('Grupo informado é inválido.');
+                }
+            }
+
+            $previousGroup = isset($before['group_id']) ? (int) $before['group_id'] : null;
+            if ($groupId !== $previousGroup) {
+                $fields[] = 'group_id = :group_id';
+                $params['group_id'] = $groupId;
+                $changes['group_id'] = ['from' => $previousGroup, 'to' => $groupId];
+            }
+        }
+
+        if ($fields === []) {
+            return $before;
+        }
+
+        $sql = 'UPDATE tickets SET ' . implode(', ', $fields) . ' WHERE id = :id';
+        $statement = $this->connection->prepare($sql);
+        foreach ($params as $key => $value) {
+            if ($key === 'group_id' && $value === null) {
+                $statement->bindValue(':' . $key, null, PDO::PARAM_NULL);
+                continue;
+            }
+            $statement->bindValue(':' . $key, $value);
+        }
+        $statement->execute();
+
+        $this->logger->info('ticket.meta_updated', [
+            'ticket_id' => $ticketId,
+            'user_id' => $actorId,
+            'changes' => $changes,
+        ]);
+
+        return $this->fetchTicketMeta($ticketId);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
     private function fetchTicketStatus(int $ticketId): array
     {
         $statement = $this->connection->prepare(
@@ -566,6 +725,27 @@ class TicketService
         $ticket['label'] = $labels[$ticketStatus] ?? ucfirst($ticketStatus);
 
         return $ticket;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function fetchTicketMeta(int $ticketId): array
+    {
+        $statement = $this->connection->prepare(
+            'SELECT t.id, t.subject, t.seriousness, t.group_id, sg.name AS group_name, sg.slug AS group_slug '
+            . 'FROM tickets t '
+            . 'LEFT JOIN support_groups sg ON sg.id = t.group_id '
+            . 'WHERE t.id = :id'
+        );
+        $statement->execute(['id' => $ticketId]);
+        $meta = $statement->fetch(PDO::FETCH_ASSOC);
+
+        if (!$meta) {
+            throw new RuntimeException('Ticket não encontrado.');
+        }
+
+        return $meta;
     }
 
     /**
@@ -1120,16 +1300,23 @@ class TicketService
 
     private function createTicketForContact(int $contactId, string $channel): int
     {
+        $defaultGroup = $this->groups->defaultGroupId();
+
         $stmt = $this->connection->prepare(
-            'INSERT INTO tickets (contact_id, status, priority, channel)'
-            . ' VALUES (:contact_id, :status, :priority, :channel)'
+            'INSERT INTO tickets (contact_id, status, priority, seriousness, group_id, channel)'
+            . ' VALUES (:contact_id, :status, :priority, :seriousness, :group_id, :channel)'
         );
-        $stmt->execute([
-            'contact_id' => $contactId,
-            'status' => Ticket::STATUS_OPEN,
-            'priority' => Ticket::PRIORITY_NORMAL,
-            'channel' => $channel,
-        ]);
+        $stmt->bindValue(':contact_id', $contactId, PDO::PARAM_INT);
+        $stmt->bindValue(':status', Ticket::STATUS_OPEN);
+        $stmt->bindValue(':priority', Ticket::PRIORITY_NORMAL);
+        $stmt->bindValue(':seriousness', Ticket::SERIOUSNESS_INFORMATION);
+        if ($defaultGroup !== null) {
+            $stmt->bindValue(':group_id', $defaultGroup, PDO::PARAM_INT);
+        } else {
+            $stmt->bindValue(':group_id', null, PDO::PARAM_NULL);
+        }
+        $stmt->bindValue(':channel', $channel);
+        $stmt->execute();
 
         $ticketId = (int) $this->connection->lastInsertId();
 
@@ -1182,7 +1369,9 @@ class TicketService
         $options = [
             'status' => null,
             'priority' => null,
+            'seriousness' => null,
             'assigned' => null,
+            'group' => null,
             'search' => null,
             'exclude' => null,
         ];
@@ -1197,11 +1386,12 @@ class TicketService
             }
         }
 
-        $sql = 'SELECT t.id, t.status, t.priority, t.opened_at, t.closed_at, t.sla_due_at, t.channel, '
-            . 'c.display_name AS contact_name, u.full_name AS agent_name '
+        $sql = 'SELECT t.id, t.status, t.priority, t.seriousness, t.group_id, t.opened_at, t.closed_at, t.sla_due_at, t.channel, '
+            . 'c.display_name AS contact_name, u.full_name AS agent_name, sg.name AS group_name '
             . 'FROM tickets t '
             . 'INNER JOIN contacts c ON c.id = t.contact_id '
-            . 'LEFT JOIN users u ON u.id = t.assigned_user_id';
+            . 'LEFT JOIN users u ON u.id = t.assigned_user_id '
+            . 'LEFT JOIN support_groups sg ON sg.id = t.group_id';
 
         $conditions = [];
         $params = [];
@@ -1216,9 +1406,31 @@ class TicketService
             $params['priority'] = $options['priority'];
         }
 
+        if (!empty($options['seriousness'])) {
+            $conditions[] = 't.seriousness = :seriousness';
+            $params['seriousness'] = $options['seriousness'];
+        }
+
         if (!empty($options['assigned']) && is_numeric($options['assigned'])) {
             $conditions[] = 't.assigned_user_id = :assigned_user_id';
             $params['assigned_user_id'] = (int) $options['assigned'];
+        }
+
+        if (!empty($options['group'])) {
+            if (is_array($options['group'])) {
+                $groupValues = [];
+                foreach ($options['group'] as $index => $group) {
+                    $key = 'group_' . $index;
+                    $groupValues[] = ':' . $key;
+                    $params[$key] = (int) $group;
+                }
+                if ($groupValues !== []) {
+                    $conditions[] = 't.group_id IN (' . implode(',', $groupValues) . ')';
+                }
+            } else {
+                $conditions[] = 't.group_id = :group_id';
+                $params['group_id'] = (int) $options['group'];
+            }
         }
 
         if (!empty($options['exclude']) && is_array($options['exclude'])) {
@@ -1252,6 +1464,16 @@ class TicketService
                 continue;
             }
 
+            if (str_starts_with($key, 'group_')) {
+                $stmt->bindValue($param, (int) $value, PDO::PARAM_INT);
+                continue;
+            }
+
+            if ($key === 'group_id') {
+                $stmt->bindValue($param, (int) $value, PDO::PARAM_INT);
+                continue;
+            }
+
             $stmt->bindValue($param, $value);
         }
         $stmt->execute();
@@ -1263,6 +1485,7 @@ class TicketService
             $slaDue = $row['sla_due_at'] ?? null;
             $row['sla_status'] = 'ok';
             $row['sla_remaining'] = null;
+            $row['group_name'] = $row['group_name'] ?? null;
 
             if (is_string($slaDue) && $slaDue !== '') {
                 try {

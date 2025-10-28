@@ -75,6 +75,42 @@ CREATE TABLE IF NOT EXISTS contacts (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS support_groups (
+    id SMALLINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(120) NOT NULL,
+    slug VARCHAR(120) NOT NULL UNIQUE,
+    description VARCHAR(255) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS support_group_targets (
+    group_id SMALLINT UNSIGNED PRIMARY KEY,
+    target_tma SMALLINT UNSIGNED NULL,
+    target_tme SMALLINT UNSIGNED NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_by BIGINT UNSIGNED NULL,
+    CONSTRAINT fk_support_group_targets_group FOREIGN KEY (group_id) REFERENCES support_groups(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_support_group_targets_user FOREIGN KEY (updated_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user_groups (
+    user_id BIGINT UNSIGNED NOT NULL,
+    group_id SMALLINT UNSIGNED NOT NULL,
+    assigned_by BIGINT UNSIGNED NULL,
+    assigned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, group_id),
+    CONSTRAINT fk_user_groups_user FOREIGN KEY (user_id) REFERENCES users(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_user_groups_group FOREIGN KEY (group_id) REFERENCES support_groups(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_user_groups_assigned_by FOREIGN KEY (assigned_by) REFERENCES users(id)
+        ON DELETE SET NULL,
+    INDEX idx_user_groups_group (group_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS tickets (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     contact_id BIGINT UNSIGNED NOT NULL,
@@ -82,7 +118,9 @@ CREATE TABLE IF NOT EXISTS tickets (
     status ENUM('open','assigned','resolved','closed') NOT NULL DEFAULT 'open',
     priority ENUM('low','normal','high','urgent') NOT NULL DEFAULT 'normal',
     predicted_priority ENUM('low','normal','high','critical') NULL,
+    seriousness ENUM('information','low','medium','high','critical') NOT NULL DEFAULT 'information',
     assigned_user_id BIGINT UNSIGNED NULL,
+    group_id SMALLINT UNSIGNED NULL,
     opened_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     closed_at DATETIME NULL,
     sla_due_at DATETIME NULL,
@@ -90,6 +128,8 @@ CREATE TABLE IF NOT EXISTS tickets (
     CONSTRAINT fk_tickets_contact FOREIGN KEY (contact_id) REFERENCES contacts(id)
         ON UPDATE CASCADE,
     CONSTRAINT fk_tickets_assigned_user FOREIGN KEY (assigned_user_id) REFERENCES users(id)
+        ON UPDATE CASCADE,
+    CONSTRAINT fk_tickets_group FOREIGN KEY (group_id) REFERENCES support_groups(id)
         ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -293,6 +333,8 @@ CREATE TABLE IF NOT EXISTS kb_vectors (
 
 CREATE INDEX idx_tickets_status ON tickets(status);
 CREATE INDEX idx_tickets_assigned_user ON tickets(assigned_user_id);
+CREATE INDEX idx_tickets_group ON tickets(group_id);
+CREATE INDEX idx_tickets_seriousness ON tickets(seriousness);
 CREATE INDEX idx_ticket_sla_due_at ON tickets(sla_due_at);
 CREATE INDEX idx_ticket_predicted_priority ON tickets(predicted_priority);
 CREATE INDEX idx_messages_ticket_sent_at ON messages(ticket_id, sent_at);

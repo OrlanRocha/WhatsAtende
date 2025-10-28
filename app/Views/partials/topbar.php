@@ -12,6 +12,7 @@ $navItems = [
     ['href' => route_path('/tickets/today'), 'icon' => 'bi-inboxes', 'label' => 'Fila'],
     ['href' => route_path('/admin/templates'), 'icon' => 'bi-stickies', 'label' => 'Templates', 'roles' => ['admin', 'dev']],
     ['href' => route_path('/admin/users'), 'icon' => 'bi-people', 'label' => 'Usuários', 'roles' => ['admin', 'dev']],
+    ['href' => route_path('/admin/reports'), 'icon' => 'bi-graph-up', 'label' => 'Relatórios', 'roles' => ['admin', 'dev', 'supervisor']],
     ['href' => route_path('/admin/logs'), 'icon' => 'bi-activity', 'label' => 'Logs', 'roles' => ['dev']],
     ['href' => route_path('/admin/webhook'), 'icon' => 'bi-plug', 'label' => 'Webhook', 'roles' => ['dev']],
     ['href' => route_path('/admin'), 'icon' => 'bi-speedometer2', 'label' => 'Configurações', 'roles' => ['admin', 'dev']],

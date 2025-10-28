@@ -108,6 +108,45 @@ ON DUPLICATE KEY UPDATE
     last_interaction_at = VALUES(last_interaction_at),
     updated_at = NOW();
 
+-- Seed support groups and targets
+INSERT INTO support_groups (
+    id,
+    name,
+    slug,
+    description,
+    created_at,
+    updated_at
+) VALUES
+    (1, 'Atendimento Inicial', 'atendimento-inicial', 'Fila padrão para triagem de atendimentos.', NOW(), NOW()),
+    (2, 'Suporte Nível 2', 'suporte-n2', 'Fila especializada para escalonamento.', NOW(), NOW())
+ON DUPLICATE KEY UPDATE
+    name = VALUES(name),
+    description = VALUES(description),
+    updated_at = NOW();
+
+INSERT INTO support_group_targets (
+    group_id,
+    target_tma,
+    target_tme,
+    updated_at,
+    updated_by
+) VALUES
+    (1, 5, 15, NOW(), 1),
+    (2, 10, 25, NOW(), 1)
+ON DUPLICATE KEY UPDATE
+    target_tma = VALUES(target_tma),
+    target_tme = VALUES(target_tme),
+    updated_at = NOW(),
+    updated_by = VALUES(updated_by);
+
+INSERT INTO user_groups (user_id, group_id, assigned_by, assigned_at) VALUES
+    (1, 1, 1, NOW()),
+    (1, 2, 1, NOW()),
+    (2, 1, 1, NOW())
+ON DUPLICATE KEY UPDATE
+    assigned_by = VALUES(assigned_by),
+    assigned_at = NOW();
+
 -- Seed tickets with metrics and messages
 INSERT INTO tickets (
     id,
@@ -115,17 +154,21 @@ INSERT INTO tickets (
     subject,
     status,
     priority,
+    seriousness,
     assigned_user_id,
+    group_id,
     opened_at,
     closed_at,
     sla_due_at,
     channel
 ) VALUES
-    (1, 1, 'Dúvida sobre faturamento', 'assigned', 'normal', 2, NOW() - INTERVAL 2 HOUR, NULL, NOW() + INTERVAL 2 HOUR, 'whatsapp')
+    (1, 1, 'Dúvida sobre faturamento', 'assigned', 'normal', 'medium', 2, 1, NOW() - INTERVAL 2 HOUR, NULL, NOW() + INTERVAL 2 HOUR, 'whatsapp')
 ON DUPLICATE KEY UPDATE
     status = VALUES(status),
     priority = VALUES(priority),
+    seriousness = VALUES(seriousness),
     assigned_user_id = VALUES(assigned_user_id),
+    group_id = VALUES(group_id),
     sla_due_at = VALUES(sla_due_at);
 
 INSERT INTO ticket_metrics (

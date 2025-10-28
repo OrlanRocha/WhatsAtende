@@ -10,8 +10,11 @@ use RuntimeException;
 
 class UserService
 {
-    public function __construct(private PDO $connection, private LoggerService $logger)
-    {
+    public function __construct(
+        private PDO $connection,
+        private LoggerService $logger,
+        private GroupService $groups
+    ) {
     }
 
     /**
@@ -59,6 +62,14 @@ class UserService
     /**
      * @return array<int, array<string, mixed>>
      */
+    public function listGroups(): array
+    {
+        return $this->groups->listGroups();
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
     public function listPermissions(): array
     {
         $stmt = $this->connection->query(
@@ -87,6 +98,7 @@ class UserService
         int $roleId,
         bool $active,
         array $permissions,
+        array $groups,
         int $actorId
     ): array {
         $fullName = $this->sanitizeFullName($fullName);
@@ -119,6 +131,7 @@ class UserService
 
         $userId = (int) $this->connection->lastInsertId();
         $synced = $this->syncUserPermissions($userId, $permissions, $actorId);
+        $syncedGroups = $this->groups->syncUserGroups($userId, $groups, $actorId);
 
         $user = $this->find($userId);
 
@@ -131,6 +144,7 @@ class UserService
             'target_user_id' => $userId,
             'message' => 'Usuário criado pelo administrador.',
             'permissions' => $synced,
+            'groups' => $syncedGroups,
         ]);
 
         return $user;
@@ -145,6 +159,7 @@ class UserService
         int $roleId,
         bool $active,
         array $permissions,
+        array $groups,
         int $actorId
     ): bool {
         $fullName = $this->sanitizeFullName($fullName);
@@ -180,12 +195,14 @@ class UserService
         }
 
         $synced = $this->syncUserPermissions($userId, $permissions, $actorId);
+        $syncedGroups = $this->groups->syncUserGroups($userId, $groups, $actorId);
 
         $this->logger->info('admin.user_updated', [
             'user_id' => $actorId,
             'target_user_id' => $userId,
             'message' => 'Dados do usuário atualizados.',
             'permissions' => $synced,
+            'groups' => $syncedGroups,
         ]);
 
         return true;
@@ -250,6 +267,8 @@ class UserService
             foreach ($users as &$user) {
                 $user['permissions'] = [];
                 $user['permission_names'] = [];
+                $user['groups'] = [];
+                $user['group_ids'] = [];
             }
             unset($user);
 
@@ -278,6 +297,8 @@ class UserService
             ];
         }
 
+        $groupMap = $this->groups->mapUsersToGroups(array_values($userIds));
+
         foreach ($users as &$user) {
             $userId = (int) ($user['id'] ?? 0);
             $permissions = array_values($grouped[$userId] ?? []);
@@ -285,6 +306,12 @@ class UserService
             $user['permission_names'] = array_map(
                 static fn (array $permission): string => (string) ($permission['name'] ?? ''),
                 $permissions
+            );
+            $userGroups = array_values($groupMap[$userId] ?? []);
+            $user['groups'] = $userGroups;
+            $user['group_ids'] = array_map(
+                static fn (array $group): int => (int) ($group['id'] ?? 0),
+                $userGroups
             );
         }
         unset($user);
