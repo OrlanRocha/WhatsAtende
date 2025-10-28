@@ -2,11 +2,15 @@
 /** @var array<int, array<string, mixed>> $users */
 /** @var string|null $status */
 /** @var string|null $error */
+$breadcrumbs = [
+    ['label' => 'Admin', 'href' => '/admin'],
+    ['label' => 'Usuários'],
+];
 $pageTitle = 'Usuários · WhatsAtende';
 include base_path('app/Views/partials/layout-start.php');
-include base_path('app/Views/admin/partials/nav.php');
+include base_path('app/Views/partials/topbar.php');
 ?>
-<div class="container-xxl py-4">
+<div class="workspace">
     <div class="d-flex flex-column flex-lg-row justify-content-between align-items-start align-items-lg-center gap-3 mb-4">
         <div>
             <h1 class="h3 mb-1 fw-semibold">Usuários do Sistema</h1>
@@ -37,6 +41,7 @@ include base_path('app/Views/admin/partials/nav.php');
                         <th>Perfil</th>
                         <th>Ativo</th>
                         <th>Atribuídos</th>
+                        <th>Permissões</th>
                         <th class="text-end">Ações</th>
                     </tr>
                     </thead>
@@ -56,6 +61,19 @@ include base_path('app/Views/admin/partials/nav.php');
                                 <?php endif; ?>
                             </td>
                             <td><?= (int) ($user['assigned_tickets'] ?? 0) ?></td>
+                            <td>
+                                <?php if (!empty($user['permissions'])): ?>
+                                    <div class="d-flex flex-wrap gap-1">
+                                        <?php foreach ($user['permissions'] as $permission): ?>
+                                            <span class="badge rounded-pill text-bg-light border">
+                                                <?= htmlspecialchars((string) ($permission['label'] ?? $permission['name'] ?? '')) ?>
+                                            </span>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php else: ?>
+                                    <span class="text-muted small">—</span>
+                                <?php endif; ?>
+                            </td>
                             <td class="text-end">
                                 <div class="btn-group" role="group">
                                     <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#userModal" data-mode="edit">
@@ -125,6 +143,36 @@ include base_path('app/Views/admin/partials/nav.php');
                                 <label class="form-check-label" for="user_is_active">Usuário ativo</label>
                             </div>
                         </div>
+                        <div class="col-12">
+                            <label class="form-label">Permissões individuais</label>
+                            <div class="d-flex flex-wrap gap-3" data-permissions-list>
+                                <?php foreach ($permissions ?? [] as $permission): ?>
+                                    <?php $permissionValue = (string) ($permission['name'] ?? ''); ?>
+                                    <div class="form-check form-check-inline align-items-start">
+                                        <input
+                                            class="form-check-input"
+                                            type="checkbox"
+                                            value="<?= htmlspecialchars($permissionValue) ?>"
+                                            id="permission-<?= (int) ($permission['id'] ?? 0) ?>"
+                                            name="permissions[]"
+                                            data-permission-checkbox
+                                        >
+                                        <label class="form-check-label" for="permission-<?= (int) ($permission['id'] ?? 0) ?>">
+                                            <span class="fw-semibold d-block"><?= htmlspecialchars((string) ($permission['label'] ?? $permissionValue)) ?></span>
+                                            <?php if (!empty($permission['description'])): ?>
+                                                <small class="text-muted"><?= htmlspecialchars((string) $permission['description']) ?></small>
+                                            <?php endif; ?>
+                                        </label>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                            <small class="text-muted d-block mt-1">Combine permissões específicas além do perfil principal do usuário.</small>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label" for="user_custom_permissions">Permissões personalizadas</label>
+                            <input type="text" class="form-control" id="user_custom_permissions" name="custom_permissions" placeholder="Ex.: reports.export, ai.override">
+                            <small class="text-muted">Separe múltiplas permissões por vírgula, espaço ou quebra de linha.</small>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -139,8 +187,8 @@ include base_path('app/Views/admin/partials/nav.php');
 </div>
 
 <script type="module">
-import { initUserModal, refreshUserTable } from '/js/modules/users.js';
+import { initUserModal, refreshUserTable } from <?= json_encode(route_path('/js/modules/users.js')) ?>;
 initUserModal('#userModal', '#userForm');
-window.addEventListener('users:refresh', () => refreshUserTable('#users-table', '/admin/users'));
+window.addEventListener('users:refresh', () => refreshUserTable('#users-table', <?= json_encode(route_path('/admin/users')) ?>));
 </script>
 <?php include base_path('app/Views/partials/layout-end.php'); ?>

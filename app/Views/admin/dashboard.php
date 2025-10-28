@@ -4,11 +4,15 @@
 /** @var array<int, array<string, mixed>> $channels */
 /** @var array<int, array<string, mixed>> $leaderboard */
 /** @var array<int, array<string, mixed>> $queue */
+$breadcrumbs = [
+    ['label' => 'Admin', 'href' => '/admin'],
+    ['label' => 'Dashboard'],
+];
 $pageTitle = 'Dashboard · WhatsAtende';
 include base_path('app/Views/partials/layout-start.php');
-include base_path('app/Views/admin/partials/nav.php');
+include base_path('app/Views/partials/topbar.php');
 ?>
-<div class="container-fluid py-4" id="dashboard" data-dashboard>
+<div class="workspace" id="dashboard" data-dashboard>
     <div class="row g-3 mb-4">
         <div class="col-sm-6 col-xl-3">
             <div class="card kpi-card shadow-sm border-0" data-kpi="open">
@@ -163,7 +167,7 @@ include base_path('app/Views/admin/partials/nav.php');
     </div>
 </div>
 <script type="module">
-import { initDashboard } from '/js/modules/dashboard.js';
+import { initDashboard } from <?= json_encode(route_path('/js/modules/dashboard.js')) ?>;
 initDashboard('#dashboard');
 </script>
 <?php include base_path('app/Views/partials/layout-end.php'); ?>

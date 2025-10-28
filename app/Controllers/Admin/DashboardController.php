@@ -17,7 +17,7 @@ class DashboardController
 
     public function index(): void
     {
-        require_role('admin');
+        require_role('admin', 'dev');
 
         $summary = $this->dashboardService->summary();
        $recentTickets = $this->dashboardService->recentTickets();

@@ -8,6 +8,64 @@ function base_path(string $path = ''): string
     return $path === '' ? $base : $base . DIRECTORY_SEPARATOR . ltrim($path, DIRECTORY_SEPARATOR);
 }
 
+function app_base_origin(): string
+{
+    return $GLOBALS['app_base_origin'] ?? '';
+}
+
+function app_base_path(): string
+{
+    return $GLOBALS['app_base_path'] ?? '';
+}
+
+function route_path(string $path = ''): string
+{
+    $basePath = app_base_path();
+    $basePath = $basePath === '/' ? '' : $basePath;
+
+    if ($path === '' || $path === '/') {
+        return $basePath === '' ? '/' : rtrim($basePath, '/') . '/';
+    }
+
+    if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://') || str_starts_with($path, '//')) {
+        return $path;
+    }
+
+    if ($basePath !== '' && (str_starts_with($path, $basePath) || str_starts_with('/' . ltrim($path, '/'), $basePath . '/'))) {
+        $normalizedExisting = str_starts_with($path, '/') ? $path : '/' . ltrim($path, '/');
+        return $normalizedExisting;
+    }
+
+    $normalized = '/' . ltrim($path, '/');
+
+    if ($basePath === '' || $basePath === '/') {
+        return $normalized;
+    }
+
+    return rtrim($basePath, '/') . $normalized;
+}
+
+function url(string $path = ''): string
+{
+    if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://') || str_starts_with($path, '//')) {
+        return $path;
+    }
+
+    $origin = rtrim(app_base_origin(), '/');
+    $route = route_path($path);
+
+    if ($origin === '') {
+        return $route;
+    }
+
+    return $route === '' ? $origin : $origin . $route;
+}
+
+function asset(string $path): string
+{
+    return url('/' . ltrim($path, '/'));
+}
+
 function load_env_file(?string $path = null, bool $overwrite = false): void
 {
     $path ??= base_path('.env');
@@ -80,6 +138,24 @@ function app_logger(): \App\Support\FileLogger
     return $logger;
 }
 
+function request_correlation_id(): string
+{
+    if (!isset($GLOBALS['whats_corr_id']) || !is_string($GLOBALS['whats_corr_id'])) {
+        try {
+            $GLOBALS['whats_corr_id'] = bin2hex(random_bytes(12));
+        } catch (\Throwable) {
+            $GLOBALS['whats_corr_id'] = uniqid('req_', true);
+        }
+    }
+
+    return $GLOBALS['whats_corr_id'];
+}
+
+function current_route_path(): string
+{
+    return parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+}
+
 function config(string $file): array
 {
     $path = base_path('config/' . trim($file, '/'));
@@ -110,7 +186,8 @@ function view(string $name, array $data = []): void
 function redirect(string $path, int $status = 302): void
 {
     http_response_code($status);
-    header('Location: ' . $path);
+    $location = url($path);
+    header('Location: ' . $location);
     exit;
 }
 
@@ -149,6 +226,35 @@ function has_role(string ...$roles): bool
     return in_array($user->role ?? null, $roles, true);
 }
 
+function has_permission(string ...$permissions): bool
+{
+    $user = auth();
+    if ($user === null) {
+        return false;
+    }
+
+    if (($user->role ?? null) === 'dev') {
+        return true;
+    }
+
+    $userPermissions = [];
+    if (isset($user->permissions) && is_array($user->permissions)) {
+        $userPermissions = $user->permissions;
+    }
+
+    if ($permissions === []) {
+        return true;
+    }
+
+    foreach ($permissions as $permission) {
+        if (in_array($permission, $userPermissions, true)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 function require_role(string ...$roles): object
 {
     $user = require_auth();
@@ -162,6 +268,34 @@ function require_role(string ...$roles): object
     return $user;
 }
 
+function require_permission(string ...$permissions): object
+{
+    $user = require_auth();
+
+    if (($user->role ?? null) === 'dev') {
+        return $user;
+    }
+
+    $userPermissions = [];
+    if (isset($user->permissions) && is_array($user->permissions)) {
+        $userPermissions = $user->permissions;
+    }
+
+    if ($permissions === []) {
+        return $user;
+    }
+
+    foreach ($permissions as $permission) {
+        if (in_array($permission, $userPermissions, true)) {
+            return $user;
+        }
+    }
+
+    http_response_code(403);
+    echo 'Acesso negado.';
+    exit;
+}
+
 function login_user(array $user): void
 {
     $_SESSION['auth_user'] = [
@@ -169,6 +303,12 @@ function login_user(array $user): void
         'full_name' => (string) ($user['full_name'] ?? ''),
         'email' => (string) ($user['email'] ?? ''),
         'role' => $user['role'] ?? null,
+        'permissions' => array_values(
+            array_map(
+                static fn ($permission): string => (string) $permission,
+                is_array($user['permissions'] ?? null) ? $user['permissions'] : []
+            )
+        ),
     ];
 
     session_regenerate_id(true);

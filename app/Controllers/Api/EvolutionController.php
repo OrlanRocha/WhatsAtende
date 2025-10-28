@@ -75,16 +75,24 @@ class EvolutionController
         }
 
         $result = $this->evolution->getProfilePicture($remoteJid);
-        if (($result['status'] ?? 500) === 200 && isset($result['path'])) {
+        $status = (int) ($result['status'] ?? 500);
+
+        if ($status === 200 && isset($result['path'])) {
             header('Content-Type: ' . ($result['content_type'] ?? 'image/jpeg'));
             readfile($result['path']);
             exit;
         }
 
+        if ($status === 404) {
+            http_response_code(204);
+            header('Content-Length: 0');
+            exit;
+        }
+
         json_response([
-            'status' => $result['status'] ?? 500,
+            'status' => $status,
             'error' => $result['error'] ?? 'Foto não encontrada',
-        ], $result['status'] ?? 500);
+        ], $status);
     }
 
     public function media(): void
