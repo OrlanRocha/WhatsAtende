@@ -9,8 +9,20 @@ export function initDashboard(selector) {
     const recentTable = root.querySelector('#recent-tickets');
     const targetsButton = root.querySelector('[data-group-targets-trigger]');
     const groupModalElement = document.getElementById('groupTargetsModal');
-    const bootstrap = window.bootstrap || null;
-    const groupModal = groupModalElement && bootstrap?.Modal ? new bootstrap.Modal(groupModalElement) : null;
+    let groupModalInstance = null;
+    const getGroupModal = () => {
+        if (!groupModalElement) {
+            return null;
+        }
+        if (!groupModalInstance) {
+            const Modal = window.bootstrap?.Modal;
+            if (!Modal) {
+                return null;
+            }
+            groupModalInstance = new Modal(groupModalElement);
+        }
+        return groupModalInstance;
+    };
     const groupList = groupModalElement?.querySelector('[data-group-list]');
     const groupFeedback = groupModalElement?.querySelector('[data-group-feedback]');
     const groupLoading = groupModalElement?.querySelector('[data-group-loading]');
@@ -236,12 +248,13 @@ export function initDashboard(selector) {
 
     targetsButton?.addEventListener('click', async (event) => {
         event.preventDefault();
-        if (!groupModal) {
+        const modal = getGroupModal();
+        if (!modal) {
             showToast('Não foi possível abrir a configuração de metas.', 'error');
             return;
         }
         await loadGroups();
-        groupModal.show();
+        modal.show();
     });
 
     groupModalElement?.addEventListener('click', async (event) => {
