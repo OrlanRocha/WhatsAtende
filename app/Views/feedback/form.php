@@ -12,6 +12,13 @@ $errorMessage = $errorMessage ?? null;
 $submittedNote = $submittedNote ?? ($feedback['note'] ?? '');
 $selectedRating = $selectedRating ?? ($feedback['rating'] ?? null);
 $token = $token ?? ($feedback['token'] ?? '');
+$ratingLabels = [
+    5 => 'Excelente — superou minhas expectativas',
+    4 => 'Muito bom — atendeu ao que eu precisava',
+    3 => 'Bom — resolveu, mas pode melhorar',
+    2 => 'Regular — tive algumas dificuldades',
+    1 => 'Precisa melhorar — não fiquei satisfeito',
+];
 $pageTitle = $pageTitle ?? 'Avaliação do atendimento · WhatsAtende';
 
 include base_path('app/Views/partials/layout-auth-start.php');
@@ -33,8 +40,24 @@ include base_path('app/Views/partials/layout-auth-start.php');
     <section class="auth-card feedback-card">
         <?php if ($status === 'available'): ?>
             <header class="feedback-header">
-                <h2>Como avalia o atendimento?</h2>
-                <p>Selecione uma nota e, se desejar, deixe um comentário. Obrigado por dedicar alguns segundos!</p>
+                <div class="feedback-header__title">
+                    <h2>Como avalia o atendimento?</h2>
+                    <p>Reserve um instante para registrar sua percepção. Levamos cada avaliação em conta para evoluir a experiência.</p>
+                </div>
+                <div class="feedback-highlights" role="list">
+                    <div class="feedback-highlights__item" role="listitem">
+                        <i class="bi bi-lightning-charge" aria-hidden="true"></i>
+                        <span>Leva menos de 30 segundos</span>
+                    </div>
+                    <div class="feedback-highlights__item" role="listitem">
+                        <i class="bi bi-shield-check" aria-hidden="true"></i>
+                        <span>Resposta segura e confidencial</span>
+                    </div>
+                    <div class="feedback-highlights__item" role="listitem">
+                        <i class="bi bi-clock-history" aria-hidden="true"></i>
+                        <span>Link válido por 24&nbsp;horas</span>
+                    </div>
+                </div>
             </header>
             <?php if ($errorMessage): ?>
                 <div class="alert alert-danger" role="alert"><?= htmlspecialchars($errorMessage) ?></div>
@@ -47,21 +70,46 @@ include base_path('app/Views/partials/layout-auth-start.php');
                             <?php
                                 $inputId = 'rating-' . $star;
                                 $isChecked = (int) $selectedRating === $star;
+                                $ariaLabel = $star . ' estrela' . ($star > 1 ? 's' : '');
                             ?>
                             <input type="radio" name="rating" value="<?= $star ?>" id="<?= $inputId ?>" <?= $isChecked ? 'checked' : '' ?> required>
-                            <label for="<?= $inputId ?>" aria-label="<?= $star ?> estrela<?= $star > 1 ? 's' : '' ?>">
+                            <label for="<?= $inputId ?>" aria-label="<?= $ariaLabel ?>" data-rating-text="<?= htmlspecialchars($ratingLabels[$star]) ?>">
                                 <i class="bi bi-star-fill" aria-hidden="true"></i>
                             </label>
                         <?php endfor; ?>
                     </div>
+                    <p class="feedback-rating-hint" data-default-text="Escolha uma nota para liberar o comentário.">
+                        <?= htmlspecialchars($selectedRating ? $ratingLabels[(int) $selectedRating] : 'Escolha uma nota para liberar o comentário.') ?>
+                    </p>
+                    <dl class="feedback-scale" aria-hidden="true">
+                        <?php foreach ($ratingLabels as $score => $label): ?>
+                            <div class="feedback-scale__item">
+                                <dt><?= $score ?> estrela<?= $score > 1 ? 's' : '' ?></dt>
+                                <dd><?= htmlspecialchars($label) ?></dd>
+                            </div>
+                        <?php endforeach; ?>
+                    </dl>
                 </fieldset>
                 <div class="mb-4">
                     <label class="form-label" for="feedback-note">Conte-nos mais (opcional)</label>
                     <textarea id="feedback-note" name="note" class="form-control" rows="4" maxlength="1000" placeholder="Compartilhe como podemos melhorar."><?= htmlspecialchars((string) $submittedNote) ?></textarea>
                     <small class="text-muted">Sua resposta é confidencial e ajuda a aperfeiçoar nosso atendimento.</small>
                 </div>
-                <button type="submit" class="btn btn-primary w-100">Enviar avaliação</button>
+                <div class="feedback-actions">
+                    <button type="submit" class="btn btn-primary btn-lg w-100">Enviar avaliação</button>
+                    <p class="feedback-privacy">
+                        Ao enviar, você concorda com o uso das informações para aprimorar nossos processos internos.
+                    </p>
+                </div>
             </form>
+            <section class="feedback-extra" aria-label="Como usamos seu feedback">
+                <h3>O que fazemos com a sua resposta?</h3>
+                <ul>
+                    <li><i class="bi bi-graph-up" aria-hidden="true"></i> Monitoramos indicadores de satisfação diariamente.</li>
+                    <li><i class="bi bi-people" aria-hidden="true"></i> Compartilhamos boas práticas com toda a equipe.</li>
+                    <li><i class="bi bi-tools" aria-hidden="true"></i> Priorizamos melhorias a partir das sugestões recebidas.</li>
+                </ul>
+            </section>
         <?php elseif ($status === 'success'): ?>
             <div class="feedback-state feedback-state--success">
                 <i class="bi bi-emoji-smile" aria-hidden="true"></i>
@@ -107,4 +155,29 @@ include base_path('app/Views/partials/layout-auth-start.php');
         <?php endif; ?>
     </section>
 </div>
+<script type="module">
+    const ratingControls = document.querySelectorAll('.rating-control input');
+    const hint = document.querySelector('.feedback-rating-hint');
+
+    if (ratingControls.length && hint) {
+        const defaultText = hint.dataset.defaultText ?? hint.textContent ?? '';
+        const updateHint = (input) => {
+            if (!input) {
+                hint.textContent = defaultText;
+                return;
+            }
+            const label = input.nextElementSibling;
+            const labelText = label?.dataset.ratingText ?? defaultText;
+            hint.textContent = labelText;
+        };
+
+        ratingControls.forEach((input) => {
+            input.addEventListener('change', () => updateHint(input));
+            input.addEventListener('focus', () => updateHint(input));
+        });
+
+        const checked = document.querySelector('.rating-control input:checked');
+        updateHint(checked ?? null);
+    }
+</script>
 <?php include base_path('app/Views/partials/layout-auth-end.php'); ?>
