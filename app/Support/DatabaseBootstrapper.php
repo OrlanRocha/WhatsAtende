@@ -43,6 +43,10 @@ final class DatabaseBootstrapper
             'label' => 'Visualizar relatórios',
             'description' => 'Permite acessar dashboards, relatórios e insights.'
         ],
+        'feedback.view' => [
+            'label' => 'Visualizar avaliações',
+            'description' => 'Permite consultar notas e comentários de atendimento.'
+        ],
     ];
 
     private const ROLE_DEFAULT_PERMISSIONS = [
@@ -53,11 +57,13 @@ final class DatabaseBootstrapper
             'tickets.assign',
             'templates.manage',
             'reports.view',
+            'feedback.view',
         ],
         'supervisor' => [
             'tickets.manage',
             'tickets.assign',
             'reports.view',
+            'feedback.view',
         ],
         'dev' => ['*'],
     ];

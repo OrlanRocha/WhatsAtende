@@ -26,7 +26,8 @@ INSERT INTO permissions (
     (5, 'templates.manage', 'Gerenciar templates', 'Permite criar e atualizar templates compartilhados.', NOW(), NOW()),
     (6, 'logs.view', 'Visualizar logs', 'Permite acessar o monitor de logs e o live tail.', NOW(), NOW()),
     (7, 'webhook.manage', 'Configurar webhook', 'Permite ajustar integrações de webhook e Evolution.', NOW(), NOW()),
-    (8, 'reports.view', 'Visualizar relatórios', 'Permite acessar dashboards e relatórios administrativos.', NOW(), NOW())
+    (8, 'reports.view', 'Visualizar relatórios', 'Permite acessar dashboards e relatórios administrativos.', NOW(), NOW()),
+    (9, 'feedback.view', 'Visualizar avaliações', 'Permite consultar notas e comentários de atendimento.', NOW(), NOW())
 ON DUPLICATE KEY UPDATE
     label = VALUES(label),
     description = VALUES(description),
@@ -64,7 +65,8 @@ INSERT INTO user_permissions (
     (1, 3, 1, NOW()),
     (1, 4, 1, NOW()),
     (1, 5, 1, NOW()),
-    (1, 8, 1, NOW())
+    (1, 8, 1, NOW()),
+    (1, 9, 1, NOW())
 ON DUPLICATE KEY UPDATE
     granted_at = VALUES(granted_at),
     granted_by = VALUES(granted_by);

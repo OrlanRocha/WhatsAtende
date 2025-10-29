@@ -18,7 +18,8 @@ class TicketService
         private LoggerService $logger,
         private SettingService $settings,
         private EvolutionService $evolution,
-        private GroupService $groups
+        private GroupService $groups,
+        private FeedbackService $feedback
     ) {
     }
 
@@ -785,7 +786,8 @@ class TicketService
                     (int) ($ticket['id'] ?? 0),
                     isset($ticket['contact_id']) ? (int) $ticket['contact_id'] : null,
                     $normalizedNative,
-                    $remoteJid
+                    $remoteJid,
+                    isset($ticket['assigned_user_id']) ? (int) $ticket['assigned_user_id'] : null
                 );
             } catch (Throwable $exception) {
                 $this->logger->error('ticket.native_history_persist_failed', [
@@ -1023,7 +1025,7 @@ class TicketService
     /**
      * @param array<int, array<string, mixed>> $messages
      */
-    private function persistNativeMessages(int $ticketId, ?int $contactId, array $messages, string $remoteJid): void
+    private function persistNativeMessages(int $ticketId, ?int $contactId, array $messages, string $remoteJid, ?int $assignedUserId = null): void
     {
         if ($ticketId <= 0 || $messages === []) {
             return;
@@ -1035,20 +1037,29 @@ class TicketService
         );
         $insert = $this->connection->prepare(
             'INSERT INTO messages (ticket_id, sender_type, user_id, body, media_type, media_url, metadata, sent_at) '
-            . 'VALUES (:ticket_id, :sender_type, NULL, :body, :media_type, :media_url, :metadata, :sent_at)'
+            . 'VALUES (:ticket_id, :sender_type, :user_id, :body, :media_type, :media_url, :metadata, :sent_at)'
+        );
+        $agentLookup = $this->connection->prepare(
+            'SELECT id, body, sent_at, metadata FROM messages'
+            . ' WHERE ticket_id = :ticket_id AND sender_type = :sender_type'
+            . ' AND (metadata IS NULL OR JSON_EXTRACT(metadata, "$.remote_id") IS NULL)'
+            . ' ORDER BY sent_at DESC LIMIT 10'
+        );
+        $updateAgent = $this->connection->prepare(
+            'UPDATE messages SET metadata = :metadata,'
+            . ' user_id = CASE WHEN :user_id_new IS NULL THEN user_id ELSE COALESCE(user_id, :user_id_new) END'
+            . ' WHERE id = :id'
         );
 
         $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
         $updatedContact = false;
         $latestSentAt = null;
-        $stored = 0;
+        $storedContact = 0;
+        $storedAgent = 0;
+        $updatedAgent = 0;
         $skipped = 0;
 
         foreach ($messages as $message) {
-            if (!empty($message['from_me'])) {
-                continue;
-            }
-
             $remoteId = $message['id'] ?? null;
             if (!is_string($remoteId) || $remoteId === '') {
                 continue;
@@ -1056,6 +1067,12 @@ class TicketService
 
             $sentAt = $message['sent_at'] ?? null;
             if (!is_string($sentAt) || $sentAt === '') {
+                continue;
+            }
+
+            try {
+                $sentAtDate = new DateTimeImmutable($sentAt);
+            } catch (Throwable) {
                 continue;
             }
 
@@ -1069,15 +1086,84 @@ class TicketService
                 continue;
             }
 
-            $metadata = json_encode([
+            $fromMe = !empty($message['from_me']);
+            if ($fromMe) {
+                $agentLookup->execute([
+                    'ticket_id' => $ticketId,
+                    'sender_type' => 'agent',
+                ]);
+
+                $candidates = $agentLookup->fetchAll(PDO::FETCH_ASSOC);
+                $matched = false;
+                $bodyCurrent = trim((string) ($message['body'] ?? ''));
+
+                foreach ($candidates as $candidate) {
+                    $candidateBody = trim((string) ($candidate['body'] ?? ''));
+
+                    $diffOk = false;
+                    try {
+                        $candidateSent = new DateTimeImmutable((string) ($candidate['sent_at'] ?? ''));
+                        $diffOk = abs($sentAtDate->getTimestamp() - $candidateSent->getTimestamp()) <= 300;
+                    } catch (Throwable) {
+                        $diffOk = false;
+                    }
+
+                    if (!$diffOk) {
+                        continue;
+                    }
+
+                    if ($candidateBody !== '' && $bodyCurrent !== '' && $candidateBody !== $bodyCurrent) {
+                        continue;
+                    }
+
+                    $metadata = [];
+                    $existingMetadata = $candidate['metadata'] ?? null;
+                    if (is_string($existingMetadata) && $existingMetadata !== '') {
+                        $decoded = json_decode($existingMetadata, true);
+                        if (is_array($decoded)) {
+                            $metadata = $decoded;
+                        }
+                    }
+
+                    $metadata['remote_id'] = $remoteId;
+                    if (isset($message['status'])) {
+                        $metadata['status'] = $message['status'];
+                    }
+                    $metadata['source'] = 'evolution_native';
+                    $metadata['from_me'] = true;
+
+                    $updateAgent->execute([
+                        'metadata' => json_encode($metadata, JSON_UNESCAPED_UNICODE) ?: null,
+                        'user_id_new' => $assignedUserId,
+                        'id' => (int) ($candidate['id'] ?? 0),
+                    ]);
+
+                    $updatedAgent++;
+                    $matched = true;
+                    break;
+                }
+
+                if ($matched) {
+                    continue;
+                }
+            }
+
+            $metadataArray = [
                 'remote_id' => $remoteId,
                 'status' => $message['status'] ?? null,
                 'source' => 'evolution_native',
-            ], JSON_UNESCAPED_UNICODE) ?: null;
+            ];
+
+            if ($fromMe) {
+                $metadataArray['from_me'] = true;
+            }
+
+            $metadata = json_encode($metadataArray, JSON_UNESCAPED_UNICODE) ?: null;
 
             $insert->execute([
                 'ticket_id' => $ticketId,
-                'sender_type' => 'contact',
+                'sender_type' => $fromMe ? 'agent' : 'contact',
+                'user_id' => $fromMe && $assignedUserId !== null ? $assignedUserId : null,
                 'body' => isset($message['body']) && $message['body'] !== '' ? (string) $message['body'] : null,
                 'media_type' => $this->normalizeMediaType($message['media_type'] ?? 'text'),
                 'media_url' => $message['media_url'] ?? null,
@@ -1085,11 +1171,16 @@ class TicketService
                 'sent_at' => $sentAt,
             ]);
 
+            if ($fromMe) {
+                $storedAgent++;
+                continue;
+            }
+
             $updatedContact = true;
             if ($latestSentAt === null || strcmp($sentAt, $latestSentAt) > 0) {
                 $latestSentAt = $sentAt;
             }
-            $stored++;
+            $storedContact++;
         }
 
         if ($updatedContact && $contactId !== null) {
@@ -1099,11 +1190,13 @@ class TicketService
             ]);
         }
 
-        if ($stored > 0) {
+        if ($storedContact > 0 || $storedAgent > 0 || $updatedAgent > 0) {
             $this->logger->info('ticket.native_messages_persisted', [
                 'ticket_id' => $ticketId,
                 'remote_jid' => $remoteJid,
-                'stored_messages' => $stored,
+                'stored_contact_messages' => $storedContact,
+                'stored_agent_messages' => $storedAgent,
+                'updated_agent_messages' => $updatedAgent,
                 'skipped_existing' => $skipped,
             ]);
         } elseif ($skipped > 0) {
@@ -1153,10 +1246,40 @@ class TicketService
             return;
         }
 
+        $tokenData = null;
+        try {
+            $tokenData = $this->feedback->issueToken($ticketId);
+        } catch (Throwable $exception) {
+            $this->logger->error('ticket.feedback_token_failed', [
+                'ticket_id' => $ticketId,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+
+        $feedbackLink = null;
+        if ($tokenData !== null && isset($tokenData['token'])) {
+            $feedbackLink = rtrim(\url('/avaliacao/' . $tokenData['token']));
+        }
+
         $configured = $this->settings->get('ticket_closure_message');
         $message = trim((string) ($configured ?? ''));
-        if ($message === '') {
-            $message = 'Agradecemos seu contato! Conte com a gente sempre que precisar. Avalie nosso atendimento respondendo com uma nota de 1 a 5.';
+
+        if ($feedbackLink !== null) {
+            if ($message === '') {
+                $message = sprintf(
+                    'Seu atendimento foi finalizado. Conte com a gente sempre que precisar! Avalie em até 24h: %s',
+                    $feedbackLink
+                );
+            } elseif (str_contains($message, '{{link}}')) {
+                $message = str_replace('{{link}}', $feedbackLink, $message);
+            } else {
+                if (!preg_match('/[.!?]$/u', $message)) {
+                    $message .= '.';
+                }
+                $message .= ' ' . $feedbackLink;
+            }
+        } elseif ($message === '') {
+            $message = 'Seu atendimento foi finalizado. Agradecemos sua confiança!';
         }
 
         try {
@@ -1182,6 +1305,11 @@ class TicketService
             ];
             if (!$result['success'] && isset($result['error'])) {
                 $metadata['error'] = $result['error'];
+            }
+            if ($tokenData !== null) {
+                $metadata['feedback_token'] = $tokenData['token'] ?? null;
+                $metadata['feedback_expires_at'] = $tokenData['expires_at'] ?? null;
+                $metadata['feedback_link'] = $feedbackLink;
             }
 
             $this->connection->prepare(

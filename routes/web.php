@@ -9,12 +9,14 @@ use App\Controllers\Admin\UserController as AdminUserController;
 use App\Controllers\Admin\WebhookController as AdminWebhookController;
 use App\Controllers\Admin\GroupController as AdminGroupController;
 use App\Controllers\Admin\ReportController as AdminReportController;
+use App\Controllers\Admin\FeedbackController as AdminFeedbackController;
 use App\Controllers\Api\EvolutionController as ApiEvolutionController;
 use App\Controllers\Api\LogStreamController;
 use App\Controllers\AuthController;
 use App\Controllers\TicketController;
 use App\Controllers\WebhookController;
 use App\Controllers\HealthController;
+use App\Controllers\FeedbackController;
 
 return [
     ['GET', '/', [TicketController::class, 'index']],
@@ -35,6 +37,7 @@ return [
     ['POST', '/admin/groups/{id}/targets', [AdminGroupController::class, 'updateTargets']],
     ['GET', '/admin/reports', [AdminReportController::class, 'index']],
     ['GET', '/admin/reports/export', [AdminReportController::class, 'export']],
+    ['GET', '/admin/avaliacoes', [AdminFeedbackController::class, 'index']],
     ['GET', '/admin/logs', [AdminLogController::class, 'index']],
     ['GET', '/admin/webhook', [AdminWebhookController::class, 'index']],
     ['POST', '/admin/webhook', [AdminWebhookController::class, 'update']],
@@ -68,6 +71,8 @@ return [
     ['GET', '/tickets/{id}/messages', [TicketController::class, 'messages']],
     ['POST', '/tickets/{id}/status', [TicketController::class, 'updateStatus']],
     ['POST', '/tickets/{id}/resolve', [TicketController::class, 'resolve']],
+    ['GET', '/avaliacao/{token}', [FeedbackController::class, 'show']],
+    ['POST', '/avaliacao/{token}', [FeedbackController::class, 'submit']],
     ['GET', '/health', [HealthController::class, 'snapshot']],
     ['POST', '/api/webhook', [WebhookController::class, 'handle']],
 ];
