@@ -1,0 +1,16 @@
+# Apache access configuration for WhatsAtende
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Block direct access to application and configuration files.
+    RewriteRule ^(?:app|config|database|routes|storage)(?:/|$) - [F,L,NC]
+    RewriteRule ^\.env(?:\..*)?$ - [F,L,NC]
+
+    # Serve existing public assets directly.
+    RewriteCond %{DOCUMENT_ROOT}/public%{REQUEST_URI} -f [OR]
+    RewriteCond %{DOCUMENT_ROOT}/public%{REQUEST_URI} -d
+    RewriteRule ^(.+)$ public/$1 [L]
+
+    # Send application routes to the front controller.
+    RewriteRule ^ public/index.php [QSA,L]
+</IfModule>
