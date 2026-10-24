@@ -18,13 +18,21 @@ class Ticket
     public const PRIORITY_HIGH = 'high';
     public const PRIORITY_URGENT = 'urgent';
 
+    public const SERIOUSNESS_INFORMATION = 'information';
+    public const SERIOUSNESS_LOW = 'low';
+    public const SERIOUSNESS_MEDIUM = 'medium';
+    public const SERIOUSNESS_HIGH = 'high';
+    public const SERIOUSNESS_CRITICAL = 'critical';
+
     public function __construct(
         public ?int $id = null,
         public int $contactId = 0,
         public ?string $subject = null,
         public string $status = self::STATUS_OPEN,
         public string $priority = self::PRIORITY_NORMAL,
+        public string $seriousness = self::SERIOUSNESS_INFORMATION,
         public ?int $assignedUserId = null,
+        public ?int $groupId = null,
         public ?DateTimeImmutable $openedAt = null,
         public ?DateTimeImmutable $closedAt = null,
         public ?DateTimeImmutable $slaDueAt = null,

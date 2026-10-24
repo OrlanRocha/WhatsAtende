@@ -2,12 +2,16 @@
 /** @var array<string, string|null> $settings */
 /** @var string|null $status */
 /** @var string|null $error */
+$breadcrumbs = [
+    ['label' => 'Admin', 'href' => '/admin'],
+    ['label' => 'Integrações'],
+];
 $pageTitle = 'Integrações · WhatsAtende';
 include base_path('app/Views/partials/layout-start.php');
-include base_path('app/Views/admin/partials/nav.php');
+include base_path('app/Views/partials/topbar.php');
 $mode = $settings['integration_mode'] ?? 'webhook';
 ?>
-<div class="container-xxl py-4">
+<div class="space-y-10 pb-12" id="webhook-admin-page">
     <div class="row g-4">
         <div class="col-lg-7">
             <div class="card shadow-sm border-0 h-100">
@@ -52,30 +56,17 @@ $mode = $settings['integration_mode'] ?? 'webhook';
                             </div>
                         </div>
                         <div class="integration-group" data-integration="native" <?= $mode === 'native' ? '' : 'hidden' ?>>
-                            <h2 class="h6 fw-semibold mt-4">Configuração Evolução Nativa</h2>
-                            <div class="row g-3">
-                                <div class="col-12">
-                                    <label for="evolution_api_url" class="form-label">Endpoint da API</label>
-                                    <input type="url" class="form-control" id="evolution_api_url" name="evolution_api_url" value="<?= htmlspecialchars((string) ($settings['evolution_api_url'] ?? '')) ?>" placeholder="https://evolution.yourdomain.com">
+                            <div class="p-8 text-center bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
+                                <div class="w-16 h-16 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mx-auto mb-4">
+                                    <i class="bi bi-lightning-charge text-3xl"></i>
                                 </div>
-                                <div class="col-md-4">
-                                    <label for="evolution_instance" class="form-label">Instância</label>
-                                    <input type="text" class="form-control" id="evolution_instance" name="evolution_instance" value="<?= htmlspecialchars((string) ($settings['evolution_instance'] ?? '')) ?>" placeholder="W001">
-                                </div>
-                                <div class="col-md-4">
-                                    <label for="evolution_api_key" class="form-label">API Key</label>
-                                    <input type="text" class="form-control" id="evolution_api_key" name="evolution_api_key" value="<?= htmlspecialchars((string) ($settings['evolution_api_key'] ?? '')) ?>" placeholder="Chave fornecida pela Evolution">
-                                    <div class="form-text">Enviada no cabeçalho <code>apikey</code>.</div>
-                                </div>
-                                <div class="col-md-4">
-                                    <label for="evolution_token" class="form-label">Token Bearer (opcional)</label>
-                                    <input type="text" class="form-control" id="evolution_token" name="evolution_token" value="<?= htmlspecialchars((string) ($settings['evolution_token'] ?? '')) ?>" placeholder="Seu token Evolution">
-                                    <div class="form-text">Usado em integrações legadas que exigem <code>Authorization: Bearer</code>.</div>
-                                </div>
-                                <div class="col-12">
-                                    <label for="evolution_default_template" class="form-label">Mensagem automática de boas-vindas</label>
-                                    <textarea class="form-control" id="evolution_default_template" name="evolution_default_template" rows="3" placeholder="Olá, somos o WhatsAtende! Como podemos te ajudar?"><?= htmlspecialchars((string) ($settings['evolution_default_template'] ?? '')) ?></textarea>
-                                </div>
+                                <h3 class="text-lg font-bold text-slate-900 dark:text-white mb-2">Configuração via Instâncias</h3>
+                                <p class="text-slate-500 dark:text-slate-400 mb-6 max-w-sm mx-auto">
+                                    A configuração nativa da Evolution agora é gerenciada de forma centralizada. Você pode cadastrar múltiplas instâncias e definir uma como padrão.
+                                </p>
+                                <a href="<?= route_path('/admin/integrations') ?>" class="btn btn-primary">
+                                    Gerenciar Instâncias
+                                </a>
                             </div>
                         </div>
                         <div class="d-flex justify-content-end gap-2 mt-4">
@@ -99,6 +90,23 @@ $mode = $settings['integration_mode'] ?? 'webhook';
                         <li><strong>Nativo:</strong> cadastre o endpoint, instância e token fornecidos pela Evolution para enviar mensagens diretamente.</li>
                         <li>Use o botão <em>Testar entrega</em> abaixo para validar as credenciais antes de publicar.</li>
                     </ol>
+                </div>
+            </div>
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="card-header">
+                    <h2 class="h6 mb-0 fw-semibold">URL de Recebimento</h2>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-2">Configure o painel da Evolution-API (ou n8n) com a URL abaixo para nos enviar os eventos de mensagens:</p>
+                    <div class="input-group mb-2">
+                        <?php 
+                            $whToken = $settings['webhook_token'] ?? '';
+                            $endpointUrl = url('/api/webhook') . ($whToken !== '' ? '?token=' . rawurlencode($whToken) : '');
+                        ?>
+                        <input type="text" class="form-control font-monospace" style="font-size: 0.85rem;" id="my_webhook_url" readonly value="<?= htmlspecialchars($endpointUrl) ?>">
+                        <button class="btn btn-outline-secondary" type="button" onclick="navigator.clipboard.writeText(document.getElementById('my_webhook_url').value); alert('URL copiada!')"><i class="bi bi-clipboard"></i></button>
+                    </div>
+                    <p class="text-xs text-muted mb-0">No Evolution, ative os eventos: <code>MESSAGES_UPSERT</code>, <code>CALL</code>.</p>
                 </div>
             </div>
             <div class="card shadow-sm border-0">
@@ -131,7 +139,7 @@ $mode = $settings['integration_mode'] ?? 'webhook';
     </div>
 </div>
 <script type="module">
-import { initIntegrationForm } from '/js/modules/integration.js';
+import { initIntegrationForm } from <?= json_encode(route_path('/js/modules/integration.js')) ?>;
 initIntegrationForm('#integrationForm');
 </script>
 <?php include base_path('app/Views/partials/layout-end.php'); ?>

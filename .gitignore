@@ -1,3 +1,12 @@
 /vendor/
 .env
 /storage/logs/*.log
+/node_modules/
+/tmp/
+/public/uploads/
+/storage/evolution/media/*
+!/storage/evolution/media/.gitkeep
+/storage/evolution/profile/*
+!/storage/evolution/profile/.gitkeep
+/.phpunit.cache/
+/.pest/

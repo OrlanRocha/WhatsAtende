@@ -1,0 +1,23 @@
+{
+  "name": "whatsatende",
+  "version": "1.0.0",
+  "description": "Este repositório contém a proposta de arquitetura para o sistema de atendimento de chamados via chat, construído em PHP 8.4+, seguindo o padrão MVC com serviços especializados e integração por webhook com a Evolution API.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "dev": "npx @tailwindcss/cli -i ./public/css/input.css -o ./public/css/style.css --watch",
+    "build": "npx @tailwindcss/cli -i ./public/css/input.css -o ./public/css/style.css --minify",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.2.2",
+    "autoprefixer": "^10.4.27",
+    "tailwindcss": "^4.2.2"
+  }
+}

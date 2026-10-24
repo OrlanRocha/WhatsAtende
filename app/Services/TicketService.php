@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\Ticket;
+use InvalidArgumentException;
 use DateTimeImmutable;
 use PDO;
+use RuntimeException;
+use Throwable;
 
 class TicketService
 {
@@ -14,41 +17,257 @@ class TicketService
         private PDO $connection,
         private LoggerService $logger,
         private SettingService $settings,
-        private EvolutionService $evolution
+        private EvolutionService $evolution,
+        private GroupService $groups,
+        private FeedbackService $feedback
     ) {
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function seriousnessOptions(): array
+    {
+        return [
+            Ticket::SERIOUSNESS_INFORMATION => 'Informação',
+            Ticket::SERIOUSNESS_LOW => 'Baixa',
+            Ticket::SERIOUSNESS_MEDIUM => 'Média',
+            Ticket::SERIOUSNESS_HIGH => 'Alta',
+            Ticket::SERIOUSNESS_CRITICAL => 'Crítica',
+        ];
     }
 
     /**
      * @return array<int, array<string, mixed>>
      */
-    public function getOpenQueue(): array
+    public function listGroups(): array
     {
-        $stmt = $this->connection->prepare(
-            'SELECT t.*, c.display_name AS contact_name FROM tickets t
-            INNER JOIN contacts c ON c.id = t.contact_id
-            WHERE t.status = :status ORDER BY t.opened_at ASC'
-        );
-        $stmt->execute(['status' => Ticket::STATUS_OPEN]);
-
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return $this->groups->listGroups();
     }
 
-    public function assignToUser(int $ticketId, int $userId): void
+    /**
+     * @return array<int, int>
+     */
+    public function getUserGroupIds(int $userId): array
     {
+        return $this->groups->getUserGroupIds($userId);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getOpenQueue(?DateTimeImmutable $openedDate = null, ?int $userId = null): array
+    {
+        $sql = 'SELECT t.*, c.display_name AS contact_name, c.profile_picture_url, c.external_id AS contact_jid, '
+            . 'sg.name AS group_name, sg.slug AS group_slug '
+            . 'FROM tickets t'
+            . ' INNER JOIN contacts c ON c.id = t.contact_id'
+            . ' LEFT JOIN support_groups sg ON sg.id = t.group_id'
+            . ' WHERE t.status = :status';
+
+        $params = ['status' => Ticket::STATUS_OPEN];
+
+        if ($userId !== null) {
+            $groupIds = $this->groups->getUserGroupIds($userId);
+            if ($groupIds === []) {
+                $default = $this->groups->defaultGroupId();
+                if ($default !== null) {
+                    $groupIds = [$default];
+                }
+            }
+
+            if (!empty($groupIds)) {
+                $placeholders = [];
+                foreach ($groupIds as $index => $groupId) {
+                    $key = 'group_' . $index;
+                    $placeholders[] = ':' . $key;
+                    $params[$key] = $groupId;
+                }
+                $sql .= ' AND (t.group_id IS NULL OR t.group_id IN (' . implode(',', $placeholders) . '))';
+            }
+        }
+
+        if ($openedDate !== null) {
+            $sql .= ' AND DATE(t.opened_at) = :opened_date';
+            $params['opened_date'] = $openedDate->format('Y-m-d');
+        }
+
+        $sql .= ' ORDER BY t.opened_at ASC';
+
+        $stmt = $this->connection->prepare($sql);
+        foreach ($params as $key => $value) {
+            $param = ':' . $key;
+            if (str_starts_with($key, 'group_')) {
+                $stmt->bindValue($param, (int) $value, PDO::PARAM_INT);
+                continue;
+            }
+            $stmt->bindValue($param, $value);
+        }
+        $stmt->execute();
+
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $today = (new DateTimeImmutable('today'))->format('Y-m-d');
+
+        return array_map(static function (array $row) use ($today): array {
+            $row['opened_today'] = false;
+
+            $openedAt = $row['opened_at'] ?? null;
+            if (is_string($openedAt) && $openedAt !== '') {
+                try {
+                    $opened = new DateTimeImmutable($openedAt);
+                    $row['opened_today'] = $opened->format('Y-m-d') === $today;
+                } catch (Throwable $exception) {
+                    // Ignore parse failures and keep opened_today as false.
+                }
+            }
+
+            $row['group_name'] = $row['group_name'] ?? null;
+            $row['group_slug'] = $row['group_slug'] ?? null;
+
+            return $row;
+        }, $rows);
+    }
+
+    /**
+     * @return array{enabled:bool,chats:array<int, array<string, mixed>>,error:?string}
+     */
+    public function listNativeChats(): array
+    {
+        $enabled = $this->evolution->isNativeEnabled();
+        $result = [
+            'enabled' => $enabled,
+            'chats' => [],
+            'error' => null,
+        ];
+
+        if (!$enabled) {
+            return $result;
+        }
+
+        $overview = $this->evolution->fetchChatsOverview();
+        if (!($overview['success'] ?? false)) {
+            $result['error'] = $overview['error'] ?? 'Falha ao consultar Evolution API.';
+            return $result;
+        }
+
+        $activeContacts = $this->fetchActiveExternalIds();
+        $chats = [];
+        foreach ($overview['chats'] ?? [] as $chat) {
+            if (!is_array($chat)) {
+                continue;
+            }
+
+            $remoteJid = (string) ($chat['id'] ?? '');
+            if ($remoteJid === '') {
+                continue;
+            }
+
+            // Fallback for Meta IDs (@lid) to show real phone numbers if available
+            if (
+                str_ends_with($remoteJid, '@lid') 
+                && is_array($chat['lastMessage'] ?? null)
+                && is_array($chat['lastMessage']['key'] ?? null)
+                && !empty($chat['lastMessage']['key']['remoteJidAlt'])
+            ) {
+                $altJid = (string)$chat['lastMessage']['key']['remoteJidAlt'];
+                if ($altJid !== '') {
+                    $remoteJid = $altJid;
+                    $chat['id'] = $altJid;
+                }
+            }
+
+            if (str_ends_with($remoteJid, '@g.us') || str_ends_with($remoteJid, '@broadcast') || str_contains($remoteJid, '-')) {
+                continue;
+            }
+
+            if (isset($activeContacts[$remoteJid])) {
+                continue;
+            }
+
+            $unread = (int) ($chat['unread'] ?? 0);
+            if ($unread <= 0) {
+                continue;
+            }
+
+            $chats[] = $chat;
+        }
+
+        $result['chats'] = array_values($chats);
+
+        return $result;
+    }
+
+    public function startNativeConversation(string $remoteJid, ?string $contactName, int $userId, ?string $lastMessageId = null): int
+    {
+        $remoteJid = trim($remoteJid);
+        if ($remoteJid === '') {
+            throw new InvalidArgumentException('Identificador do contato é obrigatório.');
+        }
+
+        if (!$this->evolution->isNativeEnabled()) {
+            throw new RuntimeException('Integração nativa não está habilitada.');
+        }
+
+        $normalizedName = $this->normalizeContactName($contactName);
+        $channel = 'whatsapp';
+
+        $this->connection->beginTransaction();
+        try {
+            $contactId = $this->findOrCreateContactByExternalId($remoteJid, $normalizedName);
+            $ticketId = $this->findActiveTicketForContact($contactId);
+            if ($ticketId === null) {
+                $ticketId = $this->createTicketForContact($contactId, $channel);
+            }
+            $this->connection->commit();
+        } catch (Throwable $exception) {
+            $this->connection->rollBack();
+            throw $exception;
+        }
+
+        $this->assignToUser($ticketId, $userId, $lastMessageId);
+
+        return $ticketId;
+    }
+
+    public function assignToUser(int $ticketId, int $userId, ?string $lastMessageId = null): void
+    {
+        $ticketSnapshotStmt = $this->connection->prepare(
+            'SELECT opened_at, sla_due_at FROM tickets WHERE id = :id'
+        );
+        $ticketSnapshotStmt->execute(['id' => $ticketId]);
+        $ticketSnapshot = $ticketSnapshotStmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+
         $this->connection->prepare(
-            'INSERT INTO ticket_metrics (ticket_id) VALUES (:ticket_id) '
-            . 'ON DUPLICATE KEY UPDATE ticket_id = ticket_id'
+            'INSERT INTO ticket_metrics (ticket_id) VALUES (:ticket_id) ' .
+            'ON DUPLICATE KEY UPDATE ticket_id = ticket_id'
         )->execute(['ticket_id' => $ticketId]);
 
-        $stmt = $this->connection->prepare(
+        $this->connection->prepare(
             'UPDATE tickets SET status = :status, assigned_user_id = :user_id WHERE id = :id'
-        );
-
-        $stmt->execute([
+        )->execute([
             'status' => Ticket::STATUS_ASSIGNED,
             'user_id' => $userId,
             'id' => $ticketId,
         ]);
+
+        $metricFragments = ['last_touch_at = NOW()'];
+        $metricParams = ['ticket_id' => $ticketId];
+        if (!empty($ticketSnapshot['opened_at'])) {
+            $metricFragments[] = 'queue_time_sec = COALESCE(queue_time_sec, TIMESTAMPDIFF(SECOND, :opened_at, NOW()))';
+            $metricParams['opened_at'] = $ticketSnapshot['opened_at'];
+        }
+        if (!empty($ticketSnapshot['sla_due_at'])) {
+            $metricFragments[] = 'sla_due_at = COALESCE(sla_due_at, :sla_due_at)';
+            $metricParams['sla_due_at'] = $ticketSnapshot['sla_due_at'];
+            $status = $this->calculateSlaStatus((string) $ticketSnapshot['sla_due_at'], new DateTimeImmutable());
+            if ($status !== null) {
+                $metricFragments[] = 'sla_status = :sla_status';
+                $metricParams['sla_status'] = $status;
+            }
+        }
+        $metricSql = 'UPDATE ticket_metrics SET ' . implode(', ', $metricFragments) . ' WHERE ticket_id = :ticket_id';
+        $metricStmt = $this->connection->prepare($metricSql);
+        $metricStmt->execute($metricParams);
 
         $this->logger->info('ticket.assigned', [
             'ticket_id' => $ticketId,
@@ -56,13 +275,110 @@ class TicketService
             'message' => 'Chamado atribuído ao atendente.',
         ]);
 
-        $integration = $this->settings->integrationSettings();
-        if (($integration['integration_mode'] ?? 'webhook') === 'native') {
+        if ($this->evolution->isNativeEnabled()) {
             $contactExternalId = $this->getContactExternalId($ticketId);
             if ($contactExternalId) {
+                $this->acknowledgeNativeConversation($contactExternalId, $lastMessageId);
                 $this->evolution->sendDefaultTemplate($contactExternalId);
             }
         }
+    }
+
+    public function acknowledgeNativeConversation(string $remoteJid, ?string $messageId = null): void
+    {
+        $remoteJid = trim($remoteJid);
+        if ($remoteJid === '') {
+            return;
+        }
+
+        if (!$this->evolution->isNativeEnabled()) {
+            return;
+        }
+
+        $targetMessageId = null;
+
+        if ($messageId !== null) {
+            $messageId = trim($messageId);
+            if ($messageId !== '') {
+                $targetMessageId = $messageId;
+            }
+        }
+
+        $messages = [];
+        if ($targetMessageId === null) {
+            $history = $this->evolution->fetchConversationMessages($remoteJid, 50);
+            if (!($history['success'] ?? false)) {
+                $this->logger->warning('ticket.native_mark_read_failed', [
+                    'remote_jid' => $remoteJid,
+                    'error' => $history['error'] ?? 'Falha ao buscar histórico da conversa para marcar como lida.',
+                ]);
+
+                return;
+            }
+
+            $messages = is_array($history['messages'] ?? null) ? $history['messages'] : [];
+        }
+
+        if ($targetMessageId === null) {
+            foreach (array_reverse($messages) as $message) {
+                if (!is_array($message)) {
+                    continue;
+                }
+
+                $fromMe = (bool) ($message['from_me'] ?? false);
+                if ($fromMe) {
+                    continue;
+                }
+
+                $status = strtoupper((string) ($message['status'] ?? ''));
+                if ($status === 'READ') {
+                    continue;
+                }
+
+                $candidate = $message['id'] ?? null;
+                if (is_string($candidate) && $candidate !== '') {
+                    $targetMessageId = $candidate;
+                    break;
+                }
+            }
+        }
+
+        if ($targetMessageId === null) {
+            foreach (array_reverse($messages) as $message) {
+                if (!is_array($message)) {
+                    continue;
+                }
+
+                if (!($message['from_me'] ?? false)) {
+                    $candidate = $message['id'] ?? null;
+                    if (is_string($candidate) && $candidate !== '') {
+                        $targetMessageId = $candidate;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if ($targetMessageId === null) {
+            return;
+        }
+
+        $result = $this->evolution->markAsRead($remoteJid, $targetMessageId);
+        if (!($result['success'] ?? false)) {
+            $this->logger->warning('ticket.native_mark_read_failed', [
+                'remote_jid' => $remoteJid,
+                'message_id' => $targetMessageId,
+                'status' => $result['status'] ?? null,
+                'error' => $result['error'] ?? $result['error_detail'] ?? null,
+            ]);
+
+            return;
+        }
+
+        $this->logger->info('ticket.native_marked_read', [
+            'remote_jid' => $remoteJid,
+            'message_id' => $targetMessageId,
+        ]);
     }
 
     /**
@@ -71,11 +387,13 @@ class TicketService
     public function getTicketWithMessages(int $ticketId): array
     {
         $stmt = $this->connection->prepare(
-            'SELECT t.*, c.display_name AS contact_name, c.external_id AS contact_external_id, au.full_name AS agent_name
-             FROM tickets t
-             INNER JOIN contacts c ON c.id = t.contact_id
-             LEFT JOIN users au ON au.id = t.assigned_user_id
-             WHERE t.id = :id'
+            'SELECT t.*, c.display_name AS contact_name, c.external_id AS contact_external_id, '
+            . 'au.full_name AS agent_name, sg.name AS group_name, sg.slug AS group_slug'
+            . ' FROM tickets t'
+            . ' INNER JOIN contacts c ON c.id = t.contact_id'
+            . ' LEFT JOIN users au ON au.id = t.assigned_user_id'
+            . ' LEFT JOIN support_groups sg ON sg.id = t.group_id'
+            . ' WHERE t.id = :id'
         );
         $stmt->execute(['id' => $ticketId]);
         $ticket = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -92,74 +410,1212 @@ class TicketService
              ORDER BY m.sent_at ASC'
         );
         $stmtMessages->execute(['id' => $ticketId]);
-        $ticket['messages'] = $stmtMessages->fetchAll(PDO::FETCH_ASSOC);
+        $dbMessages = $stmtMessages->fetchAll(PDO::FETCH_ASSOC);
+        $ticket['messages'] = $this->composeTicketMessages($ticket, $dbMessages);
 
         return $ticket;
     }
 
-    public function appendAgentMessage(int $ticketId, int $userId, string $body): void
+    /**
+     * @param array{path:string,url:string,mime:string,type:string,name:string}|null $attachment
+     */
+    public function appendAgentMessage(int $ticketId, int $userId, string $body, ?array $attachment = null): void
     {
+        $body = trim($body);
+        $mediaType = $this->normalizeMediaType($attachment['type'] ?? 'text');
+        $mediaUrl = $attachment['url'] ?? null;
+        $metadata = null;
+        $contactExternalId = null;
+
+        if ($attachment !== null) {
+            $metadata = [
+                'source' => 'agent_upload',
+                'filename' => $attachment['name'] ?? null,
+                'mime_type' => $attachment['mime'] ?? null,
+            ];
+        }
+
+        if ($this->evolution->isNativeEnabled()) {
+            $contactExternalId = $this->getContactExternalId($ticketId);
+            if ($contactExternalId === null) {
+                $this->logger->error('ticket.native_contact_missing', [
+                    'ticket_id' => $ticketId,
+                    'user_id' => $userId,
+                ]);
+
+                throw new RuntimeException('Contato não possui identificador externo para envio via Evolution.');
+            }
+
+            if ($attachment !== null) {
+                $sendResult = $this->evolution->sendMedia($contactExternalId, $attachment['path'], [
+                    'caption' => $body,
+                    'filename' => $attachment['name'] ?? null,
+                    'mime_type' => $attachment['mime'] ?? null,
+                    'type' => $mediaType === 'file' ? 'document' : $mediaType,
+                ]);
+            } else {
+                $sendResult = $this->evolution->sendText($contactExternalId, $body);
+            }
+
+            if (!$sendResult['success']) {
+                $this->logger->error('ticket.native_send_failed', [
+                    'ticket_id' => $ticketId,
+                    'user_id' => $userId,
+                    'contact' => $contactExternalId,
+                    'error' => $sendResult['error'],
+                    'media_type' => $mediaType,
+                ]);
+
+                throw new RuntimeException($sendResult['error'] ?? 'Falha ao enviar mensagem via Evolution.');
+            }
+
+            // Extract remote_id from the Evolution API response if available
+            $remoteId = $sendResult['data']['key']['id'] ?? $sendResult['data']['id'] ?? null;
+            $this->logger->info('evolution.sendResult', ['result' => $sendResult, 'remoteId' => $remoteId]);
+            if ($remoteId) {
+                if ($metadata === null) {
+                    $metadata = [];
+                }
+                $metadata['remote_id'] = $remoteId;
+            }
+        }
+
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
         $stmt = $this->connection->prepare(
-            'INSERT INTO messages (ticket_id, sender_type, user_id, body, media_type)
-             VALUES (:ticket_id, :sender_type, :user_id, :body, :media_type)'
+            'INSERT INTO messages (ticket_id, sender_type, user_id, body, media_type, media_url, metadata, sent_at) '
+            . 'VALUES (:ticket_id, :sender_type, :user_id, :body, :media_type, :media_url, :metadata, :sent_at)'
         );
         $stmt->execute([
             'ticket_id' => $ticketId,
             'sender_type' => 'agent',
             'user_id' => $userId,
-            'body' => $body,
-            'media_type' => 'text',
+            'body' => $body !== '' ? $body : null,
+            'media_type' => $mediaType,
+            'media_url' => $mediaUrl,
+            'metadata' => $metadata !== null ? (json_encode($metadata, JSON_UNESCAPED_UNICODE) ?: null) : null,
+            'sent_at' => $now,
         ]);
 
-        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
         $this->connection->prepare(
-            'UPDATE ticket_metrics SET last_response_at = :now, first_response_at = COALESCE(first_response_at, :now) WHERE ticket_id = :ticket_id'
+            'UPDATE ticket_metrics SET last_touch_at = :now, first_response_at = COALESCE(first_response_at, :now2) WHERE ticket_id = :ticket_id'
         )->execute([
             'now' => $now,
+            'now2' => $now,
             'ticket_id' => $ticketId,
         ]);
 
         $this->logger->info('ticket.agent_response', [
             'ticket_id' => $ticketId,
             'user_id' => $userId,
+            'media_type' => $mediaType,
             'message' => 'Mensagem do atendente registrada.',
+            'remote_jid' => $contactExternalId,
+            'body_length' => strlen($body),
+            'has_attachment' => $attachment !== null,
         ]);
-
-        $integration = $this->settings->integrationSettings();
-        if (($integration['integration_mode'] ?? 'webhook') === 'native') {
-            $contactExternalId = $this->getContactExternalId($ticketId);
-            if ($contactExternalId) {
-                $this->evolution->sendText($contactExternalId, $body);
-            }
-        }
     }
 
     public function resolveTicket(int $ticketId): void
     {
-        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
-        $stmtTicket = $this->connection->prepare('SELECT opened_at FROM tickets WHERE id = :id');
+        $nowDate = new DateTimeImmutable();
+        $now = $nowDate->format('Y-m-d H:i:s');
+        $stmtTicket = $this->connection->prepare('SELECT opened_at, sla_due_at FROM tickets WHERE id = :id');
         $stmtTicket->execute(['id' => $ticketId]);
-        $openedAt = $stmtTicket->fetchColumn();
+        $ticketRow = $stmtTicket->fetch(\PDO::FETCH_ASSOC) ?: null;
 
-        $stmt = $this->connection->prepare(
+        $this->connection->prepare(
             'UPDATE tickets SET status = :status, closed_at = :closed_at WHERE id = :id'
-        );
-        $stmt->execute([
+        )->execute([
             'status' => Ticket::STATUS_RESOLVED,
             'closed_at' => $now,
             'id' => $ticketId,
         ]);
 
-        $this->connection->prepare(
-            'UPDATE ticket_metrics SET resolution_time_seconds = TIMESTAMPDIFF(SECOND, :opened_at, :closed_at)
-             WHERE ticket_id = :ticket_id'
-        )->execute([
-            'opened_at' => $openedAt,
+        $metricSql = 'UPDATE ticket_metrics SET last_touch_at = :closed_at';
+        $metricParams = [
             'closed_at' => $now,
             'ticket_id' => $ticketId,
-        ]);
+        ];
+
+        if ($ticketRow && !empty($ticketRow['opened_at'])) {
+            $metricSql .= ', resolution_time_sec = TIMESTAMPDIFF(SECOND, :opened_at, :closed_at)';
+            $metricParams['opened_at'] = $ticketRow['opened_at'];
+        }
+
+        if ($ticketRow && !empty($ticketRow['sla_due_at'])) {
+            $status = $this->calculateSlaStatus((string) $ticketRow['sla_due_at'], $nowDate);
+            if ($status !== null) {
+                $metricSql .= ', sla_status = :sla_status';
+                $metricParams['sla_status'] = $status;
+            }
+        }
+
+        $metricSql .= ' WHERE ticket_id = :ticket_id';
+        $this->connection->prepare($metricSql)->execute($metricParams);
 
         $this->logger->info('ticket.resolved', ['ticket_id' => $ticketId]);
+
+        $this->sendClosureSurvey($ticketId);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function updateTicketStatus(int $ticketId, string $status, int $actorId): array
+    {
+        $status = strtolower(trim($status));
+
+        $allowed = [
+            Ticket::STATUS_OPEN,
+            Ticket::STATUS_ASSIGNED,
+            Ticket::STATUS_RESOLVED,
+            Ticket::STATUS_CLOSED,
+        ];
+
+        if (!in_array($status, $allowed, true)) {
+            throw new InvalidArgumentException('Status informado não é suportado.');
+        }
+
+        $currentStmt = $this->connection->prepare('SELECT status FROM tickets WHERE id = :id');
+        $currentStmt->execute(['id' => $ticketId]);
+        $currentValue = $currentStmt->fetchColumn();
+
+        if ($currentValue === false) {
+            throw new RuntimeException('Ticket não encontrado.');
+        }
+
+        $currentStatus = strtolower((string) $currentValue);
+        if ($currentStatus === $status) {
+            return $this->fetchTicketStatus($ticketId);
+        }
+
+        if ($status === Ticket::STATUS_RESOLVED) {
+            $this->resolveTicket($ticketId);
+        } else {
+            $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+            
+            // Logic for "Tickets Reabertos"
+            $reopenUpdate = '';
+            if (in_array($currentStatus, [Ticket::STATUS_RESOLVED, Ticket::STATUS_CLOSED], true) && $status === Ticket::STATUS_OPEN) {
+                $reopenGroupId = $this->groups->getGroupIdBySlug('tickets-reabertos');
+                if ($reopenGroupId) {
+                    $reopenUpdate = ', group_id = ' . (int) $reopenGroupId;
+                }
+            }
+
+            $query = 'UPDATE tickets SET status = :status' . $reopenUpdate;
+            $params = [
+                'status' => $status,
+                'id' => $ticketId,
+            ];
+
+            if ($status === Ticket::STATUS_CLOSED) {
+                $query .= ', closed_at = :closed_at';
+                $params['closed_at'] = $now;
+            } else {
+                $query .= ', closed_at = NULL';
+            }
+
+            $query .= ' WHERE id = :id';
+            $statement = $this->connection->prepare($query);
+            $statement->execute($params);
+
+            $this->connection->prepare(
+                'UPDATE ticket_metrics SET last_touch_at = :now WHERE ticket_id = :ticket_id'
+            )->execute([
+                'now' => $now,
+                'ticket_id' => $ticketId,
+            ]);
+        }
+
+        $ticket = $this->fetchTicketStatus($ticketId);
+
+        $this->logger->info('ticket.status_changed', [
+            'ticket_id' => $ticketId,
+            'status' => $ticket['status'] ?? $status,
+            'user_id' => $actorId,
+        ]);
+
+        return $ticket;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function updateTicketMeta(int $ticketId, array $data, int $actorId): array
+    {
+        $before = $this->fetchTicketMeta($ticketId);
+
+        $fields = [];
+        $params = ['id' => $ticketId];
+        $changes = [];
+
+        if (array_key_exists('subject', $data)) {
+            $subject = $data['subject'];
+            if ($subject !== null) {
+                $subject = trim((string) $subject);
+                if ($subject === '') {
+                    $subject = null;
+                } else {
+                    $subject = mb_substr($subject, 0, 191);
+                }
+            }
+
+            $previous = $before['subject'] ?? null;
+            if ($subject !== $previous) {
+                $fields[] = 'subject = :subject';
+                $params['subject'] = $subject;
+                $changes['subject'] = ['from' => $previous, 'to' => $subject];
+            }
+        }
+
+        if (array_key_exists('seriousness', $data)) {
+            $seriousness = strtolower(trim((string) $data['seriousness']));
+            $allowedSeriousness = array_keys($this->seriousnessOptions());
+
+            if ($seriousness === '') {
+                $seriousness = Ticket::SERIOUSNESS_INFORMATION;
+            }
+
+            if (!in_array($seriousness, $allowedSeriousness, true)) {
+                throw new InvalidArgumentException('Nível de seriedade inválido.');
+            }
+
+            $previousSeriousness = strtolower((string) ($before['seriousness'] ?? Ticket::SERIOUSNESS_INFORMATION));
+            if ($seriousness !== $previousSeriousness) {
+                $fields[] = 'seriousness = :seriousness';
+                $params['seriousness'] = $seriousness;
+                $changes['seriousness'] = ['from' => $previousSeriousness, 'to' => $seriousness];
+            }
+        }
+
+        if (array_key_exists('group_id', $data)) {
+            $groupId = $data['group_id'];
+            if ($groupId === '' || $groupId === null) {
+                $groupId = null;
+            }
+
+            if ($groupId !== null) {
+                $groupId = (int) $groupId;
+                if ($groupId <= 0 || !$this->groups->groupExists($groupId)) {
+                    throw new InvalidArgumentException('Grupo informado é inválido.');
+                }
+            }
+
+            $previousGroup = isset($before['group_id']) ? (int) $before['group_id'] : null;
+            if ($groupId !== $previousGroup) {
+                $fields[] = 'group_id = :group_id';
+                $params['group_id'] = $groupId;
+                $changes['group_id'] = ['from' => $previousGroup, 'to' => $groupId];
+            }
+        }
+
+        if ($fields === []) {
+            return $before;
+        }
+
+        $sql = 'UPDATE tickets SET ' . implode(', ', $fields) . ' WHERE id = :id';
+        $statement = $this->connection->prepare($sql);
+        foreach ($params as $key => $value) {
+            if ($key === 'group_id' && $value === null) {
+                $statement->bindValue(':' . $key, null, PDO::PARAM_NULL);
+                continue;
+            }
+            $statement->bindValue(':' . $key, $value);
+        }
+        $statement->execute();
+
+        $this->logger->info('ticket.meta_updated', [
+            'ticket_id' => $ticketId,
+            'user_id' => $actorId,
+            'changes' => $changes,
+        ]);
+
+        return $this->fetchTicketMeta($ticketId);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function fetchTicketStatus(int $ticketId): array
+    {
+        $statement = $this->connection->prepare(
+            'SELECT t.id, t.status, t.closed_at, tm.sla_status, tm.sla_due_at '
+            . 'FROM tickets t LEFT JOIN ticket_metrics tm ON tm.ticket_id = t.id WHERE t.id = :id'
+        );
+        $statement->execute(['id' => $ticketId]);
+        $ticket = $statement->fetch(PDO::FETCH_ASSOC);
+
+        if (!$ticket) {
+            throw new RuntimeException('Ticket não encontrado.');
+        }
+
+        $ticketStatus = strtolower((string) ($ticket['status'] ?? Ticket::STATUS_OPEN));
+        $labels = [
+            Ticket::STATUS_OPEN => 'Aberto',
+            Ticket::STATUS_ASSIGNED => 'Em atendimento',
+            Ticket::STATUS_RESOLVED => 'Resolvido',
+            Ticket::STATUS_CLOSED => 'Encerrado',
+        ];
+
+        $ticket['status'] = $ticketStatus;
+        $ticket['label'] = $labels[$ticketStatus] ?? ucfirst($ticketStatus);
+
+        return $ticket;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function fetchTicketMeta(int $ticketId): array
+    {
+        $statement = $this->connection->prepare(
+            'SELECT t.id, t.subject, t.seriousness, t.group_id, sg.name AS group_name, sg.slug AS group_slug '
+            . 'FROM tickets t '
+            . 'LEFT JOIN support_groups sg ON sg.id = t.group_id '
+            . 'WHERE t.id = :id'
+        );
+        $statement->execute(['id' => $ticketId]);
+        $meta = $statement->fetch(PDO::FETCH_ASSOC);
+
+        if (!$meta) {
+            throw new RuntimeException('Ticket não encontrado.');
+        }
+
+        return $meta;
+    }
+
+    /**
+     * @param array<string, mixed> $ticket
+     * @param array<int, array<string, mixed>> $dbMessages
+     * @return array<int, array<string, mixed>>
+     */
+    private function composeTicketMessages(array $ticket, array $dbMessages): array
+    {
+        $normalizedDb = $this->normalizeDatabaseMessages($dbMessages);
+
+        // Evolution API v2: Fallback for webhook-only environments
+        $remoteJid = trim((string) ($ticket['contact_external_id'] ?? ''));
+
+        // We always try to sync from Evolution when viewing a specific ticket
+        // to ensure the UI is up-to-date even if the webhook is failing.
+        if ($remoteJid === '') {
+            return $normalizedDb;
+        }
+
+        $native = $this->evolution->fetchConversationMessages($remoteJid);
+        
+        $this->logger->info('ticket.sync_debug', [
+            'ticket_id' => $ticket['id'] ?? null,
+            'db_count' => count($normalizedDb),
+            'native_success' => $native['success'] ?? false,
+            'native_count' => count($native['messages'] ?? []),
+            'native_error' => $native['error'] ?? null
+        ]);
+
+        if (!($native['success'] ?? false)) {
+            $this->logger->error('evolution.ticket_messages_failed', [
+                'ticket_id' => $ticket['id'] ?? null,
+                'remote_jid' => $remoteJid,
+                'error' => $native['error'] ?? 'Falha desconhecida ao sincronizar mensagens nativas.',
+            ]);
+
+            return $normalizedDb;
+        }
+
+        $normalizedNative = $this->normalizeNativeMessages($ticket, $native['messages'] ?? []);
+        $normalizedNative = $this->filterNativeMessagesByTicket($ticket, $normalizedNative, count($normalizedDb));
+
+        if ($normalizedNative !== []) {
+            try {
+                $this->persistNativeMessages(
+                    (int) ($ticket['id'] ?? 0),
+                    isset($ticket['contact_id']) ? (int) $ticket['contact_id'] : null,
+                    $normalizedNative,
+                    $remoteJid,
+                    isset($ticket['assigned_user_id']) ? (int) $ticket['assigned_user_id'] : null
+                );
+            } catch (Throwable $exception) {
+                $this->logger->error('ticket.native_history_persist_failed', [
+                    'ticket_id' => $ticket['id'] ?? null,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        }
+
+        if ($normalizedNative === []) {
+            return $normalizedDb;
+        }
+
+        $nativeCount = count($normalizedNative);
+        $databaseCount = count($normalizedDb);
+
+        $existing = [];
+        $existingFuzzy = [];
+        foreach ($normalizedNative as $message) {
+            $sig = $this->messageSignature($message);
+            $existing[$sig] = true;
+            $fuzzyKey = trim((string) ($message['body'] ?? '')) . '|' . substr((string) ($message['sent_at'] ?? ''), 0, 16);
+            $existingFuzzy[$fuzzyKey] = true;
+        }
+
+        $duplicates = 0;
+        foreach ($normalizedDb as $message) {
+            $signature = $this->messageSignature($message);
+            if (isset($existing[$signature])) {
+                $duplicates++;
+                continue;
+            }
+
+            $remoteId = $message['remote_id'] ?? '';
+            $fromMe = $message['from_me'] ?? false;
+            
+            // Fuzzy match for messages sent by agent but lacking remote_id
+            if ($remoteId === '' && $fromMe) {
+                $fuzzyKey = trim((string) ($message['body'] ?? '')) . '|' . substr((string) ($message['sent_at'] ?? ''), 0, 16);
+                if (isset($existingFuzzy[$fuzzyKey])) {
+                    $duplicates++;
+                    continue;
+                }
+            }
+
+            $normalizedNative[] = $message;
+        }
+
+        usort($normalizedNative, static function (array $a, array $b): int {
+            $aTime = $a['sent_at'] ?? '';
+            $bTime = $b['sent_at'] ?? '';
+
+            if ($aTime === $bTime) {
+                return strcmp((string) ($a['id'] ?? ''), (string) ($b['id'] ?? ''));
+            }
+
+            return strcmp((string) $aTime, (string) $bTime);
+        });
+
+        $mergedTotal = count($normalizedNative);
+        $addedFromDatabase = $mergedTotal - $nativeCount;
+        if ($addedFromDatabase < 0) {
+            $addedFromDatabase = 0;
+        }
+
+        $this->logger->info('ticket.native_history_synced', [
+            'ticket_id' => $ticket['id'] ?? null,
+            'remote_jid' => $remoteJid,
+            'native_messages' => $nativeCount,
+            'database_messages' => $databaseCount,
+            'merged_total' => $mergedTotal,
+            'deduplicated' => $duplicates,
+            'added_from_database' => $addedFromDatabase,
+        ]);
+
+        if ($remoteJid !== '') {
+            $lastUnreadRemoteId = null;
+            foreach (array_reverse($normalizedNative) as $message) {
+                if (($message['sender_type'] ?? '') !== 'contact') {
+                    continue;
+                }
+
+                $status = strtoupper((string) ($message['status'] ?? ''));
+                if ($status === 'READ') {
+                    continue;
+                }
+
+                $candidate = $message['remote_id'] ?? $message['id'] ?? null;
+                if (is_string($candidate) && $candidate !== '') {
+                    $lastUnreadRemoteId = $candidate;
+                    break;
+                }
+            }
+
+            if ($lastUnreadRemoteId !== null) {
+                $this->acknowledgeNativeConversation($remoteJid, $lastUnreadRemoteId);
+            }
+        }
+
+        return $normalizedNative;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $messages
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeDatabaseMessages(array $messages): array
+    {
+        $normalized = array_map(function (array $message): array {
+            $remoteId = null;
+            $metadata = $message['metadata'] ?? null;
+            if (is_string($metadata) && $metadata !== '') {
+                $decoded = json_decode($metadata, true);
+                if (is_array($decoded)) {
+                    $remoteId = isset($decoded['remote_id']) ? (string) $decoded['remote_id'] : null;
+                    if (!isset($message['status']) && isset($decoded['status'])) {
+                        $message['status'] = $decoded['status'];
+                    }
+                }
+            }
+
+            return [
+                'id' => $message['id'] ?? null,
+                'ticket_id' => $message['ticket_id'] ?? null,
+                'sender_type' => $message['sender_type'] ?? 'contact',
+                'user_id' => $message['user_id'] ?? null,
+                'body' => (string) ($message['body'] ?? ''),
+                'media_type' => $this->normalizeMediaType($message['media_type'] ?? 'text'),
+                'media_url' => (function() use ($message, $remoteId) {
+                    $url = $message['media_url'] ?? null;
+                    if ($url === null) return null;
+                    if ($remoteId !== null && str_starts_with((string) $url, 'http')) {
+                        return $this->evolution->buildMediaUrl($remoteId);
+                    }
+                    return (string) $url;
+                })(),
+                'sent_at' => isset($message['sent_at']) ? (string) $message['sent_at'] : null,
+                'agent_name' => $message['agent_name'] ?? null,
+                'status' => $message['status'] ?? null,
+                'remote_id' => $remoteId,
+            ];
+        }, $messages);
+
+        usort($normalized, static function (array $a, array $b): int {
+            $aTime = $a['sent_at'] ?? '';
+            $bTime = $b['sent_at'] ?? '';
+
+            if ($aTime === $bTime) {
+                return strcmp((string) ($a['id'] ?? ''), (string) ($b['id'] ?? ''));
+            }
+
+            return strcmp((string) $aTime, (string) $bTime);
+        });
+
+        return $normalized;
+    }
+
+    /**
+     * @param array<string, mixed> $ticket
+     * @param array<int, array<string, mixed>> $messages
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeNativeMessages(array $ticket, array $messages): array
+    {
+        $ticketId = $ticket['id'] ?? null;
+        $assignedUserId = $ticket['assigned_user_id'] ?? null;
+        $agentName = $ticket['agent_name'] ?? null;
+
+        $normalized = [];
+        foreach ($messages as $message) {
+            if (!is_array($message)) {
+                continue;
+            }
+
+            $id = isset($message['id']) ? (string) $message['id'] : '';
+            if ($id === '') {
+                continue;
+            }
+
+            $sentAt = $message['sent_at'] ?? null;
+            if (!is_string($sentAt) || $sentAt === '') {
+                continue;
+            }
+
+            $fromMe = (bool) ($message['from_me'] ?? false);
+
+            $normalized[] = [
+                'id' => $id,
+                'ticket_id' => $ticketId,
+                'sender_type' => $fromMe ? 'agent' : 'contact',
+                'user_id' => $fromMe ? $assignedUserId : null,
+                'body' => (string) ($message['body'] ?? ''),
+                'media_url' => (function() use ($message, $id) {
+                    $url = $message['media_url'] ?? null;
+                    if ($url === null) return null;
+                    if ($id !== '' && str_starts_with((string) $url, 'http')) {
+                        return $this->evolution->buildMediaUrl($id);
+                    }
+                    return (string) $url;
+                })(),
+                'sent_at' => $sentAt,
+                'agent_name' => $fromMe ? ($agentName ?: 'Você') : null,
+                'status' => $message['status'] ?? null,
+                'raw' => $message['raw'] ?? null,
+                'from_me' => $fromMe,
+                'remote_id' => $id,
+            ];
+        }
+
+        usort($normalized, static function (array $a, array $b): int {
+            $aTime = $a['sent_at'] ?? '';
+            $bTime = $b['sent_at'] ?? '';
+
+            if ($aTime === $bTime) {
+                return strcmp((string) ($a['id'] ?? ''), (string) ($b['id'] ?? ''));
+            }
+
+            return strcmp((string) $aTime, (string) $bTime);
+        });
+
+        return $normalized;
+    }
+
+    /**
+     * @param array<string, mixed> $ticket
+     * @param array<int, array<string, mixed>> $messages
+     * @return array<int, array<string, mixed>>
+     */
+    private function filterNativeMessagesByTicket(array $ticket, array $messages, int $dbMessageCount = 0): array
+    {
+        // Se for um ticket novo sem mensagens no banco (ex: recém criado via Iniciar Conversa), 
+        // mantemos o histórico nativo para dar contexto, em vez de cortar por opened_at.
+        if ($dbMessageCount === 0) {
+            return $messages;
+        }
+
+        $openedAt = $ticket['opened_at'] ?? null;
+        if (!is_string($openedAt) || $openedAt === '') {
+            return $messages;
+        }
+
+        try {
+            $opened = new DateTimeImmutable($openedAt);
+        } catch (Throwable $exception) {
+            $this->logger->warning('ticket.native_history_filter_failed', [
+                'ticket_id' => $ticket['id'] ?? null,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return $messages;
+        }
+
+        return array_values(array_filter($messages, static function (array $message) use ($opened): bool {
+            $sentAt = $message['sent_at'] ?? null;
+            if (!is_string($sentAt) || $sentAt === '') {
+                return false;
+            }
+
+            try {
+                $sent = new DateTimeImmutable($sentAt);
+            } catch (Throwable $exception) {
+                return false;
+            }
+
+            return $sent >= $opened;
+        }));
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $messages
+     */
+    private function persistNativeMessages(int $ticketId, ?int $contactId, array $messages, string $remoteJid, ?int $assignedUserId = null): void
+    {
+        if ($ticketId <= 0 || $messages === []) {
+            return;
+        }
+
+        $select = $this->connection->prepare(
+            'SELECT id FROM messages WHERE ticket_id = :ticket_id AND metadata IS NOT NULL'
+            . ' AND JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.remote_id")) = :remote_id LIMIT 1'
+        );
+        $insert = $this->connection->prepare(
+            'INSERT INTO messages (ticket_id, sender_type, user_id, body, media_type, media_url, metadata, sent_at) '
+            . 'VALUES (:ticket_id, :sender_type, :user_id, :body, :media_type, :media_url, :metadata, :sent_at)'
+        );
+        $agentLookup = $this->connection->prepare(
+            'SELECT id, body, sent_at, metadata FROM messages'
+            . ' WHERE ticket_id = :ticket_id AND sender_type = :sender_type'
+            . ' AND (metadata IS NULL OR JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.remote_id")) IS NULL)'
+            . ' ORDER BY sent_at DESC LIMIT 10'
+        );
+        $updateAgent = $this->connection->prepare(
+            'UPDATE messages SET metadata = :metadata,'
+            . ' user_id = CASE WHEN :user_id_new IS NULL THEN user_id ELSE COALESCE(user_id, :user_id_new2) END'
+            . ' WHERE id = :id'
+        );
+
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+        $updatedContact = false;
+        $latestSentAt = null;
+        $storedContact = 0;
+        $storedAgent = 0;
+        $updatedAgent = 0;
+        $skipped = 0;
+
+        foreach ($messages as $message) {
+            $remoteId = $message['id'] ?? null;
+            if (!is_string($remoteId) || $remoteId === '') {
+                continue;
+            }
+
+            $sentAt = $message['sent_at'] ?? null;
+            if (!is_string($sentAt) || $sentAt === '') {
+                continue;
+            }
+
+            try {
+                $sentAtDate = new DateTimeImmutable($sentAt);
+            } catch (Throwable) {
+                continue;
+            }
+
+            $select->execute([
+                'ticket_id' => $ticketId,
+                'remote_id' => $remoteId,
+            ]);
+
+            if ($select->fetchColumn()) {
+                $skipped++;
+                continue;
+            }
+
+            $fromMe = !empty($message['from_me']);
+            $this->logger->info('ticket.persist_loop', ['message' => $message['body'] ?? '', 'fromMe' => $fromMe]);
+            if ($fromMe) {
+                $agentLookup->execute([
+                    'ticket_id' => $ticketId,
+                    'sender_type' => 'agent',
+                ]);
+
+                $candidates = $agentLookup->fetchAll(PDO::FETCH_ASSOC);
+                $matched = false;
+                $bodyCurrent = trim((string) ($message['body'] ?? ''));
+
+                foreach ($candidates as $candidate) {
+                    $candidateBody = trim((string) ($candidate['body'] ?? ''));
+                    $this->logger->info('ticket.sync_agent_match', [
+                        'candidate_body' => $candidateBody,
+                        'current_body' => $bodyCurrent,
+                        'candidate_sent' => $candidate['sent_at'] ?? '',
+                        'current_sent' => $sentAt,
+                    ]);
+
+                    $diffOk = false;
+                    try {
+                        $candidateSent = new DateTimeImmutable((string) ($candidate['sent_at'] ?? ''));
+                        // Allow up to 24 hours difference to account for timezone conversion bugs in Evolution API
+                        $diffOk = abs($sentAtDate->getTimestamp() - $candidateSent->getTimestamp()) <= 86400;
+                    } catch (Throwable) {
+                        $diffOk = false;
+                    }
+
+                    if (!$diffOk) {
+                        continue;
+                    }
+
+                    if ($candidateBody !== '' && $bodyCurrent !== '' && $candidateBody !== $bodyCurrent) {
+                        continue;
+                    }
+
+                    $metadata = [];
+                    $existingMetadata = $candidate['metadata'] ?? null;
+                    if (is_string($existingMetadata) && $existingMetadata !== '') {
+                        $decoded = json_decode($existingMetadata, true);
+                        if (is_array($decoded)) {
+                            $metadata = $decoded;
+                        }
+                    }
+
+                    $metadata['remote_id'] = $remoteId;
+                    if (isset($message['status'])) {
+                        $metadata['status'] = $message['status'];
+                    }
+                    $metadata['source'] = 'evolution_native';
+                    $metadata['from_me'] = true;
+
+                    $updateAgent->execute([
+                        'metadata' => json_encode($metadata, JSON_UNESCAPED_UNICODE) ?: null,
+                        'user_id_new' => $assignedUserId,
+                        'user_id_new2' => $assignedUserId,
+                        'id' => (int) ($candidate['id'] ?? 0),
+                    ]);
+
+                    $updatedAgent++;
+                    $matched = true;
+                    break;
+                }
+
+                if ($matched) {
+                    continue;
+                }
+            }
+
+            $metadataArray = [
+                'remote_id' => $remoteId,
+                'status' => $message['status'] ?? null,
+                'source' => 'evolution_native',
+            ];
+
+            if ($fromMe) {
+                $metadataArray['from_me'] = true;
+            }
+
+            $metadata = json_encode($metadataArray, JSON_UNESCAPED_UNICODE) ?: null;
+
+            $insert->execute([
+                'ticket_id' => $ticketId,
+                'sender_type' => $fromMe ? 'agent' : 'contact',
+                'user_id' => $fromMe && $assignedUserId !== null ? $assignedUserId : null,
+                'body' => isset($message['body']) && $message['body'] !== '' ? (string) $message['body'] : null,
+                'media_type' => $this->normalizeMediaType($message['media_type'] ?? 'text'),
+                'media_url' => $message['media_url'] ?? null,
+                'metadata' => $metadata,
+                'sent_at' => $sentAt,
+            ]);
+
+            if ($fromMe) {
+                $storedAgent++;
+                continue;
+            }
+
+            $updatedContact = true;
+            if ($latestSentAt === null || strcmp($sentAt, $latestSentAt) > 0) {
+                $latestSentAt = $sentAt;
+            }
+            $storedContact++;
+        }
+
+        if ($updatedContact && $contactId !== null) {
+            $this->connection->prepare('UPDATE contacts SET last_interaction_at = :now WHERE id = :id')->execute([
+                'now' => $latestSentAt ?? $now,
+                'id' => $contactId,
+            ]);
+        }
+
+        if ($storedContact > 0 || $storedAgent > 0 || $updatedAgent > 0) {
+            $this->logger->info('ticket.native_messages_persisted', [
+                'ticket_id' => $ticketId,
+                'remote_jid' => $remoteJid,
+                'stored_contact_messages' => $storedContact,
+                'stored_agent_messages' => $storedAgent,
+                'updated_agent_messages' => $updatedAgent,
+                'skipped_existing' => $skipped,
+            ]);
+        } elseif ($skipped > 0) {
+            $this->logger->info('ticket.native_messages_skipped', [
+                'ticket_id' => $ticketId,
+                'remote_jid' => $remoteJid,
+                'skipped_existing' => $skipped,
+            ]);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $message
+     */
+    private function messageSignature(array $message): string
+    {
+        $remoteId = isset($message['remote_id']) ? (string) $message['remote_id'] : '';
+        if ($remoteId !== '') {
+            return 'remote:' . $remoteId;
+        }
+
+        $id = isset($message['id']) ? (string) $message['id'] : '';
+        if ($id !== '') {
+            return 'id:' . $id;
+        }
+
+        $parts = [
+            (string) ($message['sent_at'] ?? ''),
+            (string) ($message['sender_type'] ?? ''),
+            (string) ($message['body'] ?? ''),
+            (string) ($message['media_type'] ?? ''),
+            (string) ($message['media_url'] ?? ''),
+        ];
+
+        return md5(implode('|', $parts));
+    }
+
+    private function sendClosureSurvey(int $ticketId): void
+    {
+        $integration = $this->settings->integrationSettings();
+        if (($integration['integration_mode'] ?? 'webhook') !== 'native' || !$this->evolution->isNativeEnabled()) {
+            return;
+        }
+
+        $contactExternalId = $this->getContactExternalId($ticketId);
+        if ($contactExternalId === null) {
+            return;
+        }
+
+        $tokenData = null;
+        try {
+            $tokenData = $this->feedback->issueToken($ticketId);
+        } catch (Throwable $exception) {
+            $this->logger->error('ticket.feedback_token_failed', [
+                'ticket_id' => $ticketId,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+
+        $feedbackLink = null;
+        if ($tokenData !== null && isset($tokenData['token'])) {
+            $feedbackLink = rtrim(\url('/avaliacao/' . $tokenData['token']));
+        }
+
+        $configured = $this->settings->get('ticket_closure_message');
+        $message = trim((string) ($configured ?? ''));
+
+        if ($feedbackLink !== null) {
+            if ($message === '') {
+                $message = sprintf(
+                    'Seu atendimento foi finalizado. Conte com a gente sempre que precisar! Avalie em até 24h: %s',
+                    $feedbackLink
+                );
+            } elseif (str_contains($message, '{{link}}')) {
+                $message = str_replace('{{link}}', $feedbackLink, $message);
+            } else {
+                if (!preg_match('/[.!?]$/u', $message)) {
+                    $message .= '.';
+                }
+                $message .= ' ' . $feedbackLink;
+            }
+        } elseif ($message === '') {
+            $message = 'Seu atendimento foi finalizado. Agradecemos sua confiança!';
+        }
+
+        try {
+            $result = $this->evolution->sendText($contactExternalId, $message);
+            if (!$result['success']) {
+                $this->logger->warning('ticket.closure_message_failed', [
+                    'ticket_id' => $ticketId,
+                    'contact' => $contactExternalId,
+                    'error' => $result['error'] ?? 'Falha ao enviar mensagem de encerramento.',
+                ]);
+            }
+            if ($result['success']) {
+                $this->logger->info('ticket.closure_message_sent', [
+                    'ticket_id' => $ticketId,
+                    'contact' => $contactExternalId,
+                ]);
+            }
+
+            $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+            $metadata = [
+                'automation' => 'ticket_closure',
+                'success' => $result['success'],
+            ];
+            if (!$result['success'] && isset($result['error'])) {
+                $metadata['error'] = $result['error'];
+            }
+            if ($tokenData !== null) {
+                $metadata['feedback_token'] = $tokenData['token'] ?? null;
+                $metadata['feedback_expires_at'] = $tokenData['expires_at'] ?? null;
+                $metadata['feedback_link'] = $feedbackLink;
+            }
+
+            $this->connection->prepare(
+                'INSERT INTO messages (ticket_id, sender_type, user_id, body, media_type, media_url, metadata, sent_at) '
+                . 'VALUES (:ticket_id, :sender_type, NULL, :body, :media_type, NULL, :metadata, :sent_at)'
+            )->execute([
+                'ticket_id' => $ticketId,
+                'sender_type' => 'system',
+                'body' => $message,
+                'media_type' => 'text',
+                'metadata' => json_encode($metadata, JSON_UNESCAPED_UNICODE) ?: null,
+                'sent_at' => $now,
+            ]);
+        } catch (Throwable $exception) {
+            $this->logger->error('ticket.closure_message_store_failed', [
+                'ticket_id' => $ticketId,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    private function normalizeMediaType(?string $type): string
+    {
+        $normalized = strtolower((string) $type);
+
+        return match ($normalized) {
+            'image', 'photo', 'sticker' => 'image',
+            'audio', 'ptt', 'voice' => 'audio',
+            'video' => 'video',
+            'file', 'document', 'application', 'doc', 'pdf' => 'file',
+            default => 'text',
+        };
+    }
+
+    /**
+     * @return array<string, bool>
+     */
+    private function fetchActiveExternalIds(): array
+    {
+        $stmt = $this->connection->prepare(
+            'SELECT DISTINCT c.external_id'
+            . ' FROM tickets t'
+            . ' INNER JOIN contacts c ON c.id = t.contact_id'
+            . ' WHERE t.status IN (:status_open, :status_assigned)'
+        );
+        $stmt->execute([
+            'status_open' => Ticket::STATUS_OPEN,
+            'status_assigned' => Ticket::STATUS_ASSIGNED,
+        ]);
+
+        $map = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $externalId) {
+            if (is_string($externalId) && $externalId !== '') {
+                $map[$externalId] = true;
+            }
+        }
+
+        return $map;
+    }
+
+    private function findOrCreateContactByExternalId(string $externalId, ?string $displayName): int
+    {
+        $stmt = $this->connection->prepare('SELECT id, display_name FROM contacts WHERE external_id = :external_id');
+        $stmt->execute(['external_id' => $externalId]);
+        $contact = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        if ($contact) {
+            $updates = ['last_interaction_at' => $now, 'id' => (int) $contact['id']];
+            $set = 'last_interaction_at = :last_interaction_at';
+
+            $currentName = trim((string) ($contact['display_name'] ?? ''));
+            if ($displayName !== null && $currentName === '') {
+                $updates['display_name'] = $displayName;
+                $set .= ', display_name = :display_name';
+            }
+
+            $updateStmt = $this->connection->prepare('UPDATE contacts SET ' . $set . ' WHERE id = :id');
+            $updateStmt->execute($updates);
+
+            return (int) $contact['id'];
+        }
+
+        $stmtInsert = $this->connection->prepare(
+            'INSERT INTO contacts (external_id, display_name, last_interaction_at)'
+            . ' VALUES (:external_id, :display_name, :last_interaction_at)'
+        );
+        $stmtInsert->execute([
+            'external_id' => $externalId,
+            'display_name' => $displayName,
+            'last_interaction_at' => $now,
+        ]);
+
+        return (int) $this->connection->lastInsertId();
+    }
+
+    private function findActiveTicketForContact(int $contactId): ?int
+    {
+        $stmt = $this->connection->prepare(
+            'SELECT id FROM tickets'
+            . ' WHERE contact_id = :contact_id'
+            . ' AND status IN (:status_open, :status_assigned)'
+            . ' ORDER BY opened_at DESC LIMIT 1'
+        );
+        $stmt->execute([
+            'contact_id' => $contactId,
+            'status_open' => Ticket::STATUS_OPEN,
+            'status_assigned' => Ticket::STATUS_ASSIGNED,
+        ]);
+
+        $ticketId = $stmt->fetchColumn();
+
+        return $ticketId !== false ? (int) $ticketId : null;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getAssignedQueue(int $userId): array
+    {
+        $sql = 'SELECT t.*, c.display_name AS contact_name, c.profile_picture_url, c.external_id AS contact_jid, '
+            . 'sg.name AS group_name, sg.slug AS group_slug '
+            . 'FROM tickets t'
+            . ' INNER JOIN contacts c ON c.id = t.contact_id'
+            . ' LEFT JOIN support_groups sg ON sg.id = t.group_id'
+            . ' WHERE t.assigned_user_id = :user_id AND t.status IN (:assigned, :open, :waiting)';
+
+        $params = [
+            'user_id' => $userId,
+            'assigned' => Ticket::STATUS_ASSIGNED,
+            'open' => Ticket::STATUS_OPEN,
+            'waiting' => 'waiting',
+        ];
+
+        $sql .= ' ORDER BY t.priority DESC, t.opened_at ASC';
+
+        $stmt = $this->connection->prepare($sql);
+        $stmt->execute($params);
+
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $today = (new DateTimeImmutable('today'))->format('Y-m-d');
+
+        return array_map(static function (array $row) use ($today): array {
+            $row['opened_today'] = false;
+            $openedAt = $row['opened_at'] ?? null;
+            if (is_string($openedAt) && $openedAt !== '') {
+                try {
+                    $opened = new DateTimeImmutable($openedAt);
+                    $row['opened_today'] = $opened->format('Y-m-d') === $today;
+                } catch (Throwable) {
+                }
+            }
+            return $row;
+        }, $rows);
+    }
+
+    private function createTicketForContact(int $contactId, string $channel, ?int $groupId = null): int
+    {
+        // Check contact history to decide initial group
+        $historyStmt = $this->connection->prepare(
+            'SELECT COUNT(*) FROM tickets WHERE contact_id = :contact_id'
+        );
+        $historyStmt->execute(['contact_id' => $contactId]);
+        $hasHistory = (int) $historyStmt->fetchColumn() > 0;
+
+        if ($groupId === null) {
+            $groupSlug = $hasHistory ? 'novo-ticket-retorno' : 'atendimento-inicial';
+            $groupId = $this->groups->getGroupIdBySlug($groupSlug);
+        }
+
+        $now = new DateTimeImmutable();
+        $slaMinutes = (int) ($this->settings->get('default_tma_minutes', '15'));
+        $slaDueAt = $now->modify('+' . $slaMinutes . ' minutes')->format('Y-m-d H:i:s');
+
+        $stmt = $this->connection->prepare(
+            'INSERT INTO tickets (contact_id, status, priority, seriousness, group_id, channel, sla_due_at)'
+            . ' VALUES (:contact_id, :status, :priority, :seriousness, :group_id, :channel, :sla_due_at)'
+        );
+        $stmt->bindValue(':contact_id', $contactId, PDO::PARAM_INT);
+        $stmt->bindValue(':status', Ticket::STATUS_OPEN);
+        $stmt->bindValue(':priority', Ticket::PRIORITY_NORMAL);
+        $stmt->bindValue(':seriousness', Ticket::SERIOUSNESS_INFORMATION);
+        $stmt->bindValue(':group_id', $groupId, $groupId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+        $stmt->bindValue(':channel', $channel);
+        $stmt->bindValue(':sla_due_at', $slaDueAt);
+        $stmt->execute();
+
+        $ticketId = (int) $this->connection->lastInsertId();
+
+        $this->connection->prepare(
+            'INSERT INTO ticket_metrics (ticket_id) VALUES (:ticket_id)'
+            . ' ON DUPLICATE KEY UPDATE ticket_id = ticket_id'
+        )->execute(['ticket_id' => $ticketId]);
+
+        $this->logger->info('ticket.created_from_native', [
+            'ticket_id' => $ticketId,
+            'contact_id' => $contactId,
+            'group' => $groupSlug,
+            'message' => 'Ticket criado a partir da fila nativa.',
+        ]);
+
+        return $ticketId;
+    }
+
+    private function normalizeContactName(?string $name): ?string
+    {
+        if ($name === null) {
+            return null;
+        }
+
+        $trimmed = trim($name);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        return mb_substr($trimmed, 0, 150);
     }
 
     /**
@@ -175,31 +1631,170 @@ class TicketService
     }
 
     /**
+     * @param array<string, mixed>|string|null $filters
      * @return array<int, array<string, mixed>>
      */
-    public function listTickets(?string $status = null): array
+    public function listTickets(array|string|null $filters = null): array
     {
-        $sql = 'SELECT t.id, t.status, t.priority, t.opened_at, t.closed_at, t.channel, '
-            . 'c.display_name AS contact_name, u.full_name AS agent_name '
+        $options = [
+            'status' => null,
+            'priority' => null,
+            'seriousness' => null,
+            'assigned' => null,
+            'group' => null,
+            'search' => null,
+            'exclude' => null,
+        ];
+
+        if (is_string($filters) && $filters !== '') {
+            $options['status'] = $filters;
+        } elseif (is_array($filters)) {
+            if (array_key_exists('status', $filters)) {
+                $options['status'] = $filters['status'];
+            }
+            if (array_key_exists('priority', $filters)) {
+                $options['priority'] = $filters['priority'];
+            }
+            if (array_key_exists('seriousness', $filters)) {
+                $options['seriousness'] = $filters['seriousness'];
+            }
+            if (array_key_exists('assigned', $filters)) {
+                $options['assigned'] = $filters['assigned'];
+            }
+            if (array_key_exists('group', $filters)) {
+                $options['group'] = $filters['group'];
+            }
+            if (array_key_exists('search', $filters)) {
+                $options['search'] = $filters['search'];
+            }
+            if (array_key_exists('exclude', $filters)) {
+                $options['exclude'] = $filters['exclude'];
+            }
+        }
+
+        $sql = 'SELECT t.id, t.status, t.priority, t.seriousness, t.group_id, t.opened_at, t.closed_at, t.sla_due_at, t.channel, '
+            . 'c.display_name AS contact_name, c.profile_picture_url, c.external_id AS contact_jid, '
+            . 'u.full_name AS agent_name, sg.name AS group_name '
             . 'FROM tickets t '
             . 'INNER JOIN contacts c ON c.id = t.contact_id '
-            . 'LEFT JOIN users u ON u.id = t.assigned_user_id';
+            . 'LEFT JOIN users u ON u.id = t.assigned_user_id '
+            . 'LEFT JOIN support_groups sg ON sg.id = t.group_id';
 
+        $conditions = [];
         $params = [];
-        if ($status !== null && $status !== '') {
-            $sql .= ' WHERE t.status = :status';
-            $params['status'] = $status;
+
+        if (!empty($options['status'])) {
+            $conditions[] = 't.status = :status';
+            $params['status'] = $options['status'];
+        }
+
+        if (!empty($options['priority'])) {
+            $conditions[] = 't.priority = :priority';
+            $params['priority'] = $options['priority'];
+        }
+
+        if (!empty($options['seriousness'])) {
+            $conditions[] = 't.seriousness = :seriousness';
+            $params['seriousness'] = $options['seriousness'];
+        }
+
+        if (!empty($options['assigned']) && is_numeric($options['assigned'])) {
+            $conditions[] = 't.assigned_user_id = :assigned_user_id';
+            $params['assigned_user_id'] = (int) $options['assigned'];
+        }
+
+        $groupOpt = $options['group'];
+        if (!empty($groupOpt)) {
+            if (is_array($groupOpt)) {
+                $groupValues = [];
+                foreach ($groupOpt as $index => $group) {
+                    $key = 'group_' . $index;
+                    $groupValues[] = ':' . $key;
+                    $params[$key] = (int) $group;
+                }
+                if ($groupValues !== []) {
+                    $conditions[] = 't.group_id IN (' . implode(',', $groupValues) . ')';
+                }
+            } else {
+                $conditions[] = 't.group_id = :group_id';
+                $params['group_id'] = (int) $groupOpt;
+            }
+        }
+
+        $excludeOpt = $options['exclude'];
+        if (!empty($excludeOpt) && is_array($excludeOpt)) {
+            $placeholders = [];
+            foreach ($excludeOpt as $index => $status) {
+                $key = ':exclude_' . $index;
+                $placeholders[] = $key;
+                $params['exclude_' . $index] = $status;
+            }
+            if ($placeholders !== []) {
+                $conditions[] = 't.status NOT IN (' . implode(',', $placeholders) . ')';
+            }
+        }
+
+        if (!empty($options['search'])) {
+            $conditions[] = '(c.display_name LIKE :search OR CAST(t.id AS CHAR) LIKE :search)';
+            $params['search'] = '%' . trim((string) $options['search']) . '%';
+        }
+
+        if ($conditions !== []) {
+            $sql .= ' WHERE ' . implode(' AND ', $conditions);
         }
 
         $sql .= ' ORDER BY t.opened_at DESC';
 
         $stmt = $this->connection->prepare($sql);
-        if (isset($params['status'])) {
-            $stmt->bindValue(':status', $params['status']);
+        foreach ($params as $key => $value) {
+            $param = ':' . $key;
+            if ($key === 'assigned_user_id') {
+                $stmt->bindValue($param, (int) $value, PDO::PARAM_INT);
+                continue;
+            }
+
+            if (str_starts_with($key, 'group_')) {
+                $stmt->bindValue($param, (int) $value, PDO::PARAM_INT);
+                continue;
+            }
+
+            if ($key === 'group_id') {
+                $stmt->bindValue($param, (int) $value, PDO::PARAM_INT);
+                continue;
+            }
+
+            $stmt->bindValue($param, $value);
         }
         $stmt->execute();
 
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $now = new DateTimeImmutable('now');
+
+        return array_map(static function (array $row) use ($now): array {
+            $slaDue = $row['sla_due_at'] ?? null;
+            $row['sla_status'] = 'ok';
+            $row['sla_remaining'] = null;
+            $row['group_name'] = $row['group_name'] ?? null;
+
+            if (is_string($slaDue) && $slaDue !== '') {
+                try {
+                    $due = new DateTimeImmutable($slaDue);
+                    $diff = $due->getTimestamp() - $now->getTimestamp();
+                    $row['sla_remaining'] = $diff;
+                    if ($diff <= 0) {
+                        $row['sla_status'] = 'breach';
+                    } elseif ($diff <= 3600) {
+                        $row['sla_status'] = 'warning';
+                    }
+                } catch (Throwable $exception) {
+                    $row['sla_status'] = 'unknown';
+                }
+            } else {
+                $row['sla_status'] = 'unset';
+            }
+
+            return $row;
+        }, $rows);
     }
 
     private function getContactExternalId(int $ticketId): ?string
@@ -211,5 +1806,42 @@ class TicketService
         $externalId = $stmt->fetchColumn();
 
         return $externalId !== false ? (string) $externalId : null;
+    }
+
+
+    private function calculateSlaStatus(?string $slaDueAt, DateTimeImmutable $reference): ?string
+    {
+        if ($slaDueAt === null || trim($slaDueAt) === '') {
+            return null;
+        }
+
+        try {
+            $due = new DateTimeImmutable($slaDueAt);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if ($due < $reference) {
+            return 'breach';
+        }
+
+        $delta = $due->getTimestamp() - $reference->getTimestamp();
+        if ($delta <= 900) {
+            return 'warning';
+        }
+
+        return 'ok';
+    }
+
+    public function listAgents(): array
+    {
+        $stmt = $this->connection->query(
+            'SELECT u.id, u.full_name, r.name as role ' .
+            'FROM users u ' .
+            'JOIN roles r ON u.role_id = r.id ' .
+            'WHERE r.name IN ("admin", "agent", "dev") ' .
+            'ORDER BY u.full_name ASC'
+        );
+        return $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
     }
 }

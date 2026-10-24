@@ -1,94 +1,98 @@
-# WhatsAtende
+# WhatsAtende - Estrutura Inicial
 
-Sistema de atendimento de chamados em PHP, com painel administrativo, fila de tickets e integracao com WhatsApp pela Evolution API.
+Este repositório contém a proposta de arquitetura para o sistema de atendimento de chamados via chat, construído em PHP 8.4+, seguindo o padrão MVC com serviços especializados e integração por webhook com a Evolution API.
 
-> Status: projeto em desenvolvimento. A release `v0.1.0` corrige a instalacao no Windows/Apache e padroniza a configuracao inicial. Os PRs abertos contem evolucoes que ainda nao fazem parte do branch padrao.
+## Estrutura de Diretórios
 
-## Recursos atuais
-
-- autenticacao, cadastro e recuperacao de senha;
-- fila, atribuicao, mensagens e encerramento de tickets;
-- painel administrativo para usuarios, templates, logs e webhook;
-- recebimento idempotente de eventos por webhook;
-- integracao nativa com a Evolution API;
-- schema e dados de exemplo para MariaDB.
-
-## Requisitos
-
-- PHP 8.0 ou superior, com extensoes `pdo` e `pdo_mysql`;
-- MariaDB 10.5+ ou MySQL 8+;
-- Apache com `mod_rewrite`, ou o servidor embutido do PHP para desenvolvimento;
-- uma instancia da Evolution API para os recursos de WhatsApp.
-
-## Instalacao
-
-```bash
-git clone https://github.com/OrlanRocha/WhatsAtende.git
-cd WhatsAtende
-cp .env.example .env
+```
+app/
+  helpers.php
+  Controllers/
+    Admin/
+      DashboardController.php
+      LogController.php
+      TemplateController.php
+      TicketController.php
+      UserController.php
+      WebhookController.php
+    AuthController.php
+    TicketController.php
+    WebhookController.php
+  Models/
+    Ticket.php
+  Services/
+    AuthService.php
+    DashboardService.php
+    LoggerService.php
+    SettingService.php
+    TicketService.php
+    TemplateService.php
+    UserService.php
+    WebhookService.php
+  Views/
+    admin/
+      dashboard.php
+      logs/index.php
+      partials/nav.php
+      templates/index.php
+      tickets/index.php
+      users/form.php
+      users/index.php
+      webhook/index.php
+    auth/
+      forgot.php
+      login.php
+      register.php
+      reset.php
+    atendimento.php
+config/
+  database.php
+database/
+  schema.sql
+  seeds.sql
+docs/
+  flow.md
+public/
+  index.php
+  css/
+  img/
+  js/
+routes/
+  web.php
 ```
 
-Edite `.env` com as credenciais do banco e da Evolution API. O nome padrao do banco e `whats_atende`.
+## Schema do Banco de Dados
 
-Crie a estrutura e, opcionalmente, os dados de demonstracao:
+O arquivo [`database/schema.sql`](database/schema.sql) traz o SQL completo para criação das tabelas `users`, `roles`, `contacts`, `tickets`, `ticket_metrics`, `messages`, `templates`, `logs`, `password_resets`, `login_attempts`, `settings` e `webhook_events`, com índices e relacionamentos adequados ao MariaDB.
 
-```bash
-mysql -u root -p < database/schema.sql
-mysql -u root -p < database/seeds.sql
-```
+Para popular o ambiente com dados de exemplo (contas iniciais, templates e um ticket demonstrativo), execute também [`database/seeds.sql`](database/seeds.sql) após criar o schema.
 
-Inicie o ambiente de desenvolvimento:
+> Credenciais iniciais:
+> - Admin: `admin@example.com` / `Admin123!`
+> - Atendente: `agent@example.com` / `Agent123!`
 
-```bash
-php -S localhost:8000 -t public
-```
+## Configuração de Ambiente
 
-Acesse `http://localhost:8000`. Em Apache, aponte o `DocumentRoot` preferencialmente para `public/`; os arquivos `.htaccess` tambem suportam a instalacao pela raiz do repositorio.
+- Copie o arquivo `.env.example` para `.env` e ajuste as variáveis obrigatórias:
+  - `ADMIN_USERNAME` e `ADMIN_PASSWORD` são usados na preparação inicial do ambiente.
+  - `EVO_API_BASE`, `EVO_INSTANCE` e `EVO_API_KEY` habilitam a integração nativa com a Evolution API.
+  - Caso utilize Webhook, defina também `WEBHOOK_URL` e `WEBHOOK_TOKEN`.
+- Os valores ausentes são reportados no arquivo de log `storage/logs/app.log`, permitindo identificar rapidamente inconsistências de configuração.
 
-## Configuracao
+## Pontos de Destaque
 
-As principais variaveis estao documentadas em [`.env.example`](.env.example):
+- **MVC + Services:** Controllers finos que delegam lógica de negócio para serviços (`TicketService`, `UserService`, `TemplateService`, `WebhookService`).
+- **Webhook Resiliente:** Armazenamento do payload bruto, idempotência via chave única e transação para garantir consistência.
+- **Painel Responsivo:** Frontend modernizado utilizando puramente **Tailwind CSS** e **JavaScript Vanilla** (ES6+), removendo dependências legadas (jQuery/Bootstrap) para maior performance e facilidade de manutenção no chat em tempo real com suporte a mídias.
+- **Autenticação Completa:** Fluxo de login, cadastro, logout e recuperação de senha com tokens de redefinição persistidos no banco.
+- **Proteção de Autenticação:** Serviço de throttling limita tentativas consecutivas de login, aplicando bloqueio temporário por IP/e-mail e registrando eventos suspeitos.
+- **Área Administrativa Completa:** Dashboard, CRUD de usuários, templates de mensagem, lista de solicitações, configuração do webhook Evolution/n8n e visualização de logs ficam disponíveis em `/admin`, acessível apenas para o perfil `admin`.
+- **Evolution API Nativa:** Endpoint autenticado em `/api/evolution` expõe ações de chats, mensagens, mídias e envio direto utilizando API Key/token definidos pelo administrador.
+- **Logs Centralizados:** `LoggerService` grava eventos críticos na tabela `logs`, permitindo auditoria completa e consulta filtrada diretamente na interface administrativa.
+- **Sanitização de Dados:** Entradas de usuários e mensagens de retorno são normalizadas/escapadas para impedir XSS em toasts, cadastros e listagens administrativas.
+- **Preparado para Métricas:** A tabela `ticket_metrics` facilita cálculo de tempos médios e indicadores do dashboard administrativo.
+- **Configurações Persistentes:** A tabela `settings` guarda URL/token do webhook, garantindo que somente chamadas autorizadas sejam aceitas pelo endpoint `/api/webhook`.
 
-- `DB_*`: conexao com MariaDB/MySQL;
-- `EVO_API_BASE`, `EVO_INSTANCE` e `EVO_API_KEY`: acesso a Evolution API;
-- `WEBHOOK_URL` e `WEBHOOK_TOKEN`: recebimento e validacao do webhook;
-- `INTEGRATION_MODE`: `webhook` ou `native`.
+## Fluxo de Dados
 
-Os dados de demonstracao criam as contas abaixo:
-
-| Perfil | Usuario | Senha |
-| --- | --- | --- |
-| Administrador | `admin@example.com` | `Admin123!` |
-| Atendente | `agent@example.com` | `Agent123!` |
-
-Troque essas senhas imediatamente fora de um ambiente local.
-
-## Estrutura
-
-```text
-app/        controllers, services, models e views
-config/     configuracao do banco
-database/   schema e dados de exemplo
-docs/       documentacao do fluxo
-public/     front controller e arquivos estaticos
-routes/     definicao das rotas HTTP
-storage/    logs e cache local da integracao
-```
-
-Veja [docs/flow.md](docs/flow.md) para o fluxo de mensagens e [CHANGELOG.md](CHANGELOG.md) para o historico de releases.
-
-## Politica de atualizacao
-
-Cada mudanca entregue deve atualizar a documentacao afetada e o `CHANGELOG.md`, receber um commit descritivo, ser enviada ao GitHub e gerar uma release versionada.
-
-## Producao
-
-- nao publique o arquivo `.env`;
-- use HTTPS e credenciais exclusivas;
-- restrinja a escrita de `storage/` ao usuario do servidor;
-- altere as contas de demonstracao ou nao execute `database/seeds.sql`;
-- configure backups e rotacao de logs.
-
-## Licenca
-
-Distribuido sob a licenca presente em [LICENSE](LICENSE).
+Consulte [`docs/flow.md`](docs/flow.md) para o passo a passo de como uma mensagem recebida no webhook é transformada em chamado e apresentada ao atendente.

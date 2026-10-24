@@ -4,8 +4,12 @@ declare(strict_types=1);
 
 namespace App\Controllers;
 
+use App\Models\Ticket;
 use App\Services\LoggerService;
 use App\Services\TicketService;
+use DateTimeImmutable;
+use InvalidArgumentException;
+use RuntimeException;
 use Throwable;
 
 class TicketController
@@ -18,23 +22,232 @@ class TicketController
 
     public function index(): void
     {
-        require_auth();
-        $queue = $this->ticketService->getOpenQueue();
+        $user = require_auth();
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+
+        $userId = (int) ($user->id ?? 0);
+        $queue = $this->ticketService->getOpenQueue(null, $userId);
+        $native = $this->ticketService->listNativeChats();
+        $groups = $this->ticketService->listGroups();
+        $userGroups = $userId > 0 ? $this->ticketService->getUserGroupIds($userId) : [];
 
         if (is_ajax()) {
-            json_response(['queue' => $queue]);
+            json_response([
+                'queue' => $queue,
+                'native' => $native,
+                'groups' => $groups,
+                'userGroups' => $userGroups,
+            ]);
+            exit;
         }
+
+        $seriousnessOptions = $this->ticketService->seriousnessOptions();
 
         view('tickets/queue', [
             'queue' => $queue,
+            'pageId' => 'queue-page',
+            'queueTitle' => 'Fila em tempo real',
+            'queueDescription' => 'Chamados aguardando atribuição atualizam automaticamente a cada 10 segundos.',
+            'queueEndpoint' => '/tickets',
+            'showTodayLink' => true,
+            'showAllLink' => false,
+            'nativeChats' => $native,
+            'nativeStartEndpoint' => '/tickets/native/start',
+            'supportGroups' => $groups,
+            'userGroups' => $userGroups,
+            'seriousnessOptions' => $seriousnessOptions,
+        ]);
+    }
+
+    public function mine(): void
+    {
+        $user = require_auth();
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+
+        $userId = (int) ($user->id ?? 0);
+        $queue = $this->ticketService->getAssignedQueue($userId);
+        $native = $this->ticketService->listNativeChats();
+        $groups = $this->ticketService->listGroups();
+        $userGroups = $userId > 0 ? $this->ticketService->getUserGroupIds($userId) : [];
+
+        if (is_ajax()) {
+            json_response([
+                'queue' => $queue,
+                'native' => $native,
+                'groups' => $groups,
+                'userGroups' => $userGroups,
+            ]);
+            exit;
+        }
+
+        $seriousnessOptions = $this->ticketService->seriousnessOptions();
+
+        view('tickets/queue', [
+            'queue' => $queue,
+            'pageId' => 'mine-queue-page',
+            'queueTitle' => 'Meus Atendimentos',
+            'queueDescription' => 'Estes são os chamados que estão atualmente atribuídos a você.',
+            'queueEndpoint' => '/tickets/mine',
+            'showTodayLink' => false,
+            'showAllLink' => false,
+            'nativeChats' => $native,
+            'nativeStartEndpoint' => '/tickets/native/start',
+            'supportGroups' => $groups,
+            'userGroups' => $userGroups,
+            'seriousnessOptions' => $seriousnessOptions,
+        ]);
+    }
+
+    public function overview(): void
+    {
+        $user = require_auth();
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+
+        $status = filter_input(INPUT_GET, 'status', FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: null;
+        $priority = filter_input(INPUT_GET, 'priority', FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: null;
+        $seriousness = filter_input(INPUT_GET, 'seriousness', FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: null;
+        $search = filter_input(INPUT_GET, 'q', FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: null;
+        $mine = filter_input(INPUT_GET, 'mine', FILTER_VALIDATE_BOOL);
+        $excludeResolved = filter_input(INPUT_GET, 'hide_resolved', FILTER_VALIDATE_BOOL);
+
+        $filters = [];
+        if ($status) {
+            $filters['status'] = $status;
+        }
+        if ($priority) {
+            $filters['priority'] = $priority;
+        }
+        if ($seriousness) {
+            $filters['seriousness'] = $seriousness;
+        }
+        if ($search) {
+            $filters['search'] = $search;
+        }
+        if ($mine) {
+            $filters['assigned'] = (int) $user->id;
+        }
+        if (!in_array($user->role ?? null, ['admin', 'dev'], true)) {
+            $groupIds = $this->ticketService->getUserGroupIds((int) $user->id);
+            if ($groupIds !== []) {
+                $filters['group'] = $groupIds;
+            }
+        }
+
+        $allTickets = $this->ticketService->listTickets($filters);
+
+        $statusMap = [
+            'open' => 0,
+            'assigned' => 0,
+            'resolved' => 0,
+            'closed' => 0,
+            'waiting' => 0,
+            'breach' => 0,
+        ];
+
+        foreach ($allTickets as $ticket) {
+            $statusKey = $ticket['status'] ?? 'open';
+            if (isset($statusMap[$statusKey])) {
+                $statusMap[$statusKey]++;
+            }
+            if (($ticket['status'] ?? '') === 'open' && empty($ticket['agent_name'])) {
+                $statusMap['waiting']++;
+            }
+            if (($ticket['sla_status'] ?? '') === 'breach') {
+                $statusMap['breach']++;
+            }
+        }
+
+        $tickets = array_filter($allTickets, function ($ticket) use ($status, $excludeResolved) {
+            if ($status && ($ticket['status'] ?? '') !== $status) {
+                return false;
+            }
+            if ($excludeResolved && in_array($ticket['status'] ?? '', ['resolved', 'closed'], true)) {
+                return false;
+            }
+            return true;
+        });
+
+        $tickets = array_values($tickets);
+
+        $native = $this->ticketService->listNativeChats();
+        $groups = $this->ticketService->listGroups();
+        $userGroups = (int) ($user->id ?? 0) > 0 ? $this->ticketService->getUserGroupIds((int) $user->id) : [];
+
+        json_response([
+            'tickets' => $tickets,
+            'summary' => $statusMap,
+            'native' => $native,
+            'groups' => $groups,
+            'userGroups' => $userGroups,
+        ]);
+    }
+
+    public function today(): void
+    {
+        $user = require_auth();
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+
+        $today = new DateTimeImmutable('today');
+        $userId = (int) ($user->id ?? 0);
+        $queue = $this->ticketService->getOpenQueue($today, $userId);
+        $native = $this->ticketService->listNativeChats();
+        $groups = $this->ticketService->listGroups();
+        $userGroups = $userId > 0 ? $this->ticketService->getUserGroupIds($userId) : [];
+
+        if (is_ajax()) {
+            json_response([
+                'queue' => $queue,
+                'native' => $native,
+                'groups' => $groups,
+                'userGroups' => $userGroups,
+            ]);
+            exit;
+        }
+
+        $seriousnessOptions = $this->ticketService->seriousnessOptions();
+
+        view('tickets/queue', [
+            'queue' => $queue,
+            'pageId' => 'today-queue-page',
+            'queueTitle' => 'Chamados iniciados hoje',
+            'queueDescription' => 'Acompanhe apenas os atendimentos que começaram na data atual.',
+            'queueEndpoint' => '/tickets/today',
+            'showTodayLink' => false,
+            'showAllLink' => true,
+            'nativeChats' => $native,
+            'nativeStartEndpoint' => '/tickets/native/start',
+            'supportGroups' => $groups,
+            'userGroups' => $userGroups,
+            'seriousnessOptions' => $seriousnessOptions,
         ]);
     }
 
     public function show(int $ticketId): void
     {
-        require_auth();
+        $user = require_auth();
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
         try {
             $ticket = $this->ticketService->getTicketWithMessages($ticketId);
+            
+            // Auto-assign if enabled and unassigned
+            if (empty($ticket['assigned_user_id']) && $this->settings->get('auto_assign_on_open', '1') === '1') {
+                if (in_array($user->role ?? '', ['admin', 'agent', 'dev'], true)) {
+                    $this->ticketService->assignToUser($ticketId, (int) $user->id, null);
+                    // Refresh ticket data or manually update local array
+                    $ticket['assigned_user_id'] = (int) $user->id;
+                    $ticket['status'] = Ticket::STATUS_ASSIGNED;
+                }
+            }
         } catch (Throwable $exception) {
             $this->logger->error('ticket.show_failed', [
                 'ticket_id' => $ticketId,
@@ -47,17 +260,30 @@ class TicketController
         }
 
         $templates = $this->ticketService->listMessageTemplates();
+        $groups = $this->ticketService->listGroups();
+        $userGroups = $this->ticketService->getUserGroupIds((int) ($user->id ?? 0));
+
+        $seriousnessOptions = $this->ticketService->seriousnessOptions();
+        
+        $agents = [];
+        if (in_array($user->role ?? '', ['admin', 'dev'], true)) {
+            $agents = $this->ticketService->listAgents();
+        }
 
         view('tickets/show', [
             'ticket' => $ticket,
             'templates' => $templates,
+            'supportGroups' => $groups,
+            'userGroups' => $userGroups,
+            'seriousnessOptions' => $seriousnessOptions,
+            'agents' => $agents,
         ]);
     }
 
     public function assign(int $ticketId): void
     {
         $user = require_auth();
-        if (!in_array($user->role ?? null, ['admin', 'agent'], true)) {
+        if (!in_array($user->role ?? null, ['admin', 'agent', 'dev'], true)) {
             if (is_ajax()) {
                 json_response(['message' => 'Acesso restrito a atendentes.'], 403);
             }
@@ -66,22 +292,139 @@ class TicketController
             return;
         }
         $userId = (int) $user->id;
-        $this->ticketService->assignToUser($ticketId, $userId);
+        $payload = $this->getRequestPayload();
+        $targetUserId = (int) ($payload['user_id'] ?? $_POST['user_id'] ?? 0);
+
+        if ($targetUserId > 0 && in_array($user->role ?? '', ['admin', 'dev'], true)) {
+            $userId = $targetUserId;
+        }
+
+        $this->ticketService->assignToUser($ticketId, $userId, null);
 
         if (is_ajax()) {
             json_response([
                 'message' => 'Chamado atribuído com sucesso.',
-                'redirect' => '/tickets/' . $ticketId,
+                'redirect' => route_path('/tickets/' . $ticketId),
             ]);
         }
 
         redirect('/tickets/' . $ticketId);
     }
 
+    public function updateMeta(int $ticketId): void
+    {
+        $user = require_auth();
+        if (!in_array($user->role ?? null, ['admin', 'dev', 'supervisor', 'agent'], true)) {
+            json_response(['message' => 'Acesso negado.'], 403);
+            return;
+        }
+
+        $payload = $this->getRequestPayload();
+        $subject = $payload['subject'] ?? $_POST['subject'] ?? null;
+        $seriousness = $payload['seriousness'] ?? $_POST['seriousness'] ?? null;
+        $groupId = $payload['group_id'] ?? $_POST['group_id'] ?? null;
+
+        try {
+            $meta = $this->ticketService->updateTicketMeta($ticketId, [
+                'subject' => $subject,
+                'seriousness' => $seriousness,
+                'group_id' => $groupId,
+            ], (int) $user->id);
+
+            json_response([
+                'message' => 'Detalhes do ticket atualizados.',
+                'meta' => $meta,
+            ]);
+        } catch (InvalidArgumentException $exception) {
+            json_response(['message' => $exception->getMessage()], 422);
+        } catch (Throwable $exception) {
+            $this->logger->error('ticket.meta_update_failed', [
+                'ticket_id' => $ticketId,
+                'user_id' => $user->id ?? null,
+                'error' => $exception->getMessage(),
+            ]);
+
+            json_response(['message' => 'Não foi possível atualizar o ticket.'], 500);
+        }
+    }
+
+    public function startNativeConversation(): void
+    {
+        $user = require_auth();
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+        if (!in_array($user->role ?? null, ['admin', 'agent', 'dev'], true)) {
+            json_response(['error' => 'Acesso restrito a atendentes.'], 403);
+            return;
+        }
+
+        $payload = $this->getRequestPayload();
+
+        $remoteJid = trim((string) ($payload['remote_jid'] ?? $_POST['remote_jid'] ?? ''));
+        $name = trim((string) ($payload['name'] ?? $_POST['name'] ?? ''));
+        $lastMessageId = trim((string) ($payload['last_message_id'] ?? $_POST['last_message_id'] ?? ''));
+
+        try {
+            $ticketId = $this->ticketService->startNativeConversation(
+                $remoteJid,
+                $name !== '' ? $name : null,
+                (int) $user->id,
+                $lastMessageId !== '' ? $lastMessageId : null
+            );
+        } catch (InvalidArgumentException $exception) {
+            $this->logger->warning('ticket.native_start_validation_failed', [
+                'user_id' => $user->id ?? null,
+                'error' => $exception->getMessage(),
+            ]);
+            json_response(['error' => $exception->getMessage()], 422);
+            return;
+        } catch (RuntimeException $exception) {
+            $this->logger->error('ticket.native_start_failed', [
+                'user_id' => $user->id ?? null,
+                'error' => $exception->getMessage(),
+            ]);
+            json_response(['error' => $exception->getMessage()], 400);
+            return;
+        } catch (Throwable $exception) {
+            $this->logger->error('ticket.native_start_failed', [
+                'user_id' => $user->id ?? null,
+                'error' => $exception->getMessage(),
+            ]);
+            json_response(['error' => 'Não foi possível iniciar a conversa.'], 500);
+            return;
+        }
+
+        json_response([
+            'message' => 'Conversa iniciada com sucesso.',
+            'ticket_id' => $ticketId,
+            'redirect' => route_path('/tickets/' . $ticketId),
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function getRequestPayload(): array
+    {
+        $contentType = $_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '';
+        if (is_string($contentType) && str_contains($contentType, 'application/json')) {
+            $rawInput = file_get_contents('php://input');
+            if ($rawInput !== false && $rawInput !== '') {
+                $decoded = json_decode($rawInput, true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                    return $decoded;
+                }
+            }
+        }
+
+        return [];
+    }
+
     public function storeMessage(int $ticketId): void
     {
         $user = require_auth();
-        if (!in_array($user->role ?? null, ['admin', 'agent'], true)) {
+        if (!in_array($user->role ?? null, ['admin', 'agent', 'dev'], true)) {
             if (is_ajax()) {
                 json_response(['message' => 'Acesso restrito a atendentes.'], 403);
             }
@@ -91,40 +434,230 @@ class TicketController
             return;
         }
         $body = trim($_POST['message'] ?? '');
-        if ($body === '') {
+        try {
+            $attachment = $this->prepareAttachment($ticketId);
+        } catch (InvalidArgumentException $exception) {
             http_response_code(422);
             header('Content-Type: application/json');
-            echo json_encode(['error' => 'Message body is required.']);
+            echo json_encode(['error' => $exception->getMessage()]);
+            return;
+        } catch (RuntimeException $exception) {
+            http_response_code(400);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => $exception->getMessage()]);
+            return;
+        }
+
+        if ($body === '' && $attachment === null) {
+            http_response_code(422);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'Informe uma mensagem ou selecione um arquivo para envio.']);
             return;
         }
 
         $userId = (int) $user->id;
-        $this->ticketService->appendAgentMessage($ticketId, $userId, $body);
+
+        try {
+            $this->ticketService->appendAgentMessage($ticketId, $userId, $body, $attachment);
+        } catch (RuntimeException $exception) {
+            $this->logger->error('ticket.store_message_failed', [
+                'ticket_id' => $ticketId,
+                'user_id' => $userId,
+                'error' => $exception->getMessage(),
+            ]);
+
+            json_response(['error' => $exception->getMessage()], 502);
+            return;
+        } catch (Throwable $exception) {
+            $this->logger->error('ticket.store_message_failed', [
+                'ticket_id' => $ticketId,
+                'user_id' => $userId,
+                'error' => $exception->getMessage(),
+            ]);
+
+            json_response(['error' => 'Não foi possível registrar a mensagem.'], 500);
+            return;
+        }
 
         json_response(['message' => 'Mensagem enviada.']);
+    }
+
+    /**
+     * @return array{path:string,url:string,mime:string,type:string,name:string}|null
+     */
+    private function prepareAttachment(int $ticketId): ?array
+    {
+        if (!isset($_FILES['attachment']) || !is_array($_FILES['attachment'])) {
+            return null;
+        }
+
+        $file = $_FILES['attachment'];
+        $error = $file['error'] ?? UPLOAD_ERR_NO_FILE;
+        if ($error === UPLOAD_ERR_NO_FILE) {
+            return null;
+        }
+
+        if ($error !== UPLOAD_ERR_OK) {
+            throw new RuntimeException('Falha ao processar o upload do arquivo.');
+        }
+
+        $tmpPath = $file['tmp_name'] ?? '';
+        if (!is_string($tmpPath) || $tmpPath === '' || !is_uploaded_file($tmpPath)) {
+            throw new RuntimeException('Upload inválido recebido pelo servidor.');
+        }
+
+        $mime = mime_content_type($tmpPath) ?: 'application/octet-stream';
+        $type = $this->detectMediaType($mime);
+        if ($type === null) {
+            throw new InvalidArgumentException('Apenas arquivos de imagem, áudio ou vídeo são suportados.');
+        }
+
+        $extension = $this->guessExtension($mime, $type);
+        $directory = base_path('public/uploads/tickets/' . $ticketId);
+        if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
+            throw new RuntimeException('Não foi possível preparar o diretório de anexos.');
+        }
+
+        try {
+            $filename = bin2hex(random_bytes(12)) . ($extension !== '' ? '.' . $extension : '');
+        } catch (Throwable $exception) {
+            throw new RuntimeException('Não foi possível preparar o arquivo para envio.');
+        }
+        $destination = rtrim($directory, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $filename;
+
+        if (!move_uploaded_file($tmpPath, $destination)) {
+            throw new RuntimeException('Falha ao armazenar o anexo enviado.');
+        }
+
+        $publicUrl = '/uploads/tickets/' . $ticketId . '/' . $filename;
+
+        return [
+            'path' => $destination,
+            'url' => $publicUrl,
+            'mime' => $mime,
+            'type' => $type,
+            'name' => is_string($file['name'] ?? null) ? (string) $file['name'] : $filename,
+        ];
+    }
+
+    private function detectMediaType(string $mime): ?string
+    {
+        $mime = strtolower($mime);
+        if (str_starts_with($mime, 'image/')) {
+            return 'image';
+        }
+
+        if (str_starts_with($mime, 'audio/')) {
+            return 'audio';
+        }
+
+        if (str_starts_with($mime, 'video/')) {
+            return 'video';
+        }
+
+        return null;
+    }
+
+    private function guessExtension(string $mime, string $type): string
+    {
+        $map = [
+            'image/jpeg' => 'jpg',
+            'image/png' => 'png',
+            'image/gif' => 'gif',
+            'image/webp' => 'webp',
+            'audio/mpeg' => 'mp3',
+            'audio/ogg' => 'ogg',
+            'audio/wav' => 'wav',
+            'audio/webm' => 'webm',
+            'audio/mp4' => 'm4a',
+            'audio/aac' => 'aac',
+            'video/mp4' => 'mp4',
+            'video/ogg' => 'ogv',
+            'video/webm' => 'webm',
+            'video/quicktime' => 'mov',
+        ];
+
+        if (isset($map[$mime])) {
+            return $map[$mime];
+        }
+
+        return match ($type) {
+            'image' => 'jpg',
+            'audio' => 'mp3',
+            'video' => 'mp4',
+            default => '',
+        };
     }
 
 
     public function messages(int $ticketId): void
     {
         require_auth();
+
         try {
             $ticket = $this->ticketService->getTicketWithMessages($ticketId);
+            json_response($ticket['messages'] ?? []);
         } catch (\Throwable $exception) {
-            http_response_code(404);
-            header('Content-Type: application/json');
-            echo json_encode([]);
+            $this->logger->error('ticket.messages_fetch_failed', [
+                'ticket_id' => $ticketId,
+                'error' => $exception->getMessage(),
+            ]);
+
+            json_response([
+                'messages' => [],
+                'status' => 'missing',
+                'error' => 'Ticket não encontrado ou inacessível.',
+            ]);
+        }
+    }
+
+    public function updateStatus(int $ticketId): void
+    {
+        $user = require_permission('tickets.manage');
+        $payload = $this->getRequestPayload();
+        $status = $payload['status'] ?? ($_POST['status'] ?? null);
+        $status = is_string($status) ? trim($status) : '';
+
+        if ($status === '') {
+            json_response(['error' => 'Informe o status desejado para o ticket.'], 422);
             return;
         }
 
-        header('Content-Type: application/json');
-        echo json_encode($ticket['messages'] ?? []);
+        try {
+            $ticket = $this->ticketService->updateTicketStatus($ticketId, $status, (int) $user->id);
+        } catch (InvalidArgumentException $exception) {
+            json_response(['error' => $exception->getMessage()], 422);
+            return;
+        } catch (RuntimeException $exception) {
+            $this->logger->error('ticket.status_update_failed', [
+                'ticket_id' => $ticketId,
+                'status' => $status,
+                'error' => $exception->getMessage(),
+            ]);
+            json_response(['error' => 'Não foi possível atualizar o status do ticket.'], 400);
+            return;
+        } catch (Throwable $exception) {
+            $this->logger->error('ticket.status_update_failed', [
+                'ticket_id' => $ticketId,
+                'status' => $status,
+                'error' => $exception->getMessage(),
+            ]);
+            json_response(['error' => 'Ocorreu uma falha inesperada ao atualizar o ticket.'], 500);
+            return;
+        }
+
+        $label = $ticket['label'] ?? ucfirst((string) ($ticket['status'] ?? $status));
+
+        json_response([
+            'message' => sprintf('Status atualizado para %s.', $label),
+            'ticket' => $ticket,
+        ]);
     }
 
     public function resolve(int $ticketId): void
     {
         $user = require_auth();
-        if (!in_array($user->role ?? null, ['admin', 'agent'], true)) {
+        if (!in_array($user->role ?? null, ['admin', 'agent', 'dev'], true)) {
             if (is_ajax()) {
                 json_response(['message' => 'Acesso restrito a atendentes.'], 403);
             }
@@ -137,7 +670,7 @@ class TicketController
         if (is_ajax()) {
             json_response([
                 'message' => 'Chamado finalizado com sucesso.',
-                'redirect' => '/tickets',
+                'redirect' => route_path('/tickets'),
             ]);
         }
 

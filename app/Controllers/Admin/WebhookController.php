@@ -15,7 +15,7 @@ class WebhookController
 
     public function index(): void
     {
-        require_role('admin');
+        require_role('dev');
         $settings = $this->settingService->integrationSettings();
 
         if (is_ajax()) {
@@ -24,6 +24,11 @@ class WebhookController
 
         view('admin/webhook/index', [
             'settings' => $settings,
+            'pageTitle' => 'Configurações de Integração',
+            'breadcrumbs' => [
+                ['label' => 'Administração'],
+                ['label' => 'Integração Webhook']
+            ],
             'status' => get_flash('admin_status'),
             'error' => get_flash('admin_error'),
         ]);
@@ -31,7 +36,7 @@ class WebhookController
 
     public function update(): void
     {
-        $admin = require_role('admin');
+        $operator = require_role('dev');
         $isAjax = is_ajax();
 
         $mode = $_POST['integration_mode'] ?? 'webhook';
@@ -55,7 +60,7 @@ class WebhookController
             redirect('/admin/webhook');
         }
 
-        $this->settingService->updateIntegrationSettings((int) $admin->id, $data);
+        $this->settingService->updateIntegrationSettings((int) $operator->id, $data);
 
         if ($isAjax) {
             json_response([
@@ -70,7 +75,7 @@ class WebhookController
 
     public function test(): void
     {
-        $admin = require_role('admin');
+        $operator = require_role('dev');
         $isAjax = is_ajax();
 
         $contact = trim($_POST['contact'] ?? '');
@@ -85,7 +90,7 @@ class WebhookController
             redirect('/admin/webhook');
         }
 
-        $success = $this->evolutionService->sendTestMessage($contact, $message, (int) $admin->id);
+        $success = $this->evolutionService->sendTestMessage($contact, $message, (int) $operator->id);
 
         if ($isAjax) {
             if ($success) {

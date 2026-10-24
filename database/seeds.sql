@@ -1,11 +1,37 @@
 -- Seed data for WhatsAtende helpdesk system
 USE whats_atende;
 
+DELETE FROM login_attempts;
+
 -- Ensure base roles exist with consistent identifiers
 INSERT INTO roles (id, name) VALUES
     (1, 'admin'),
-    (2, 'agent')
+    (2, 'agent'),
+    (3, 'supervisor'),
+    (4, 'dev')
 ON DUPLICATE KEY UPDATE name = VALUES(name);
+
+INSERT INTO permissions (
+    id,
+    name,
+    label,
+    description,
+    created_at,
+    updated_at
+) VALUES
+    (1, 'users.manage', 'Gerenciar usuários', 'Permite criar, editar e remover usuários.', NOW(), NOW()),
+    (2, 'permissions.manage', 'Gerenciar permissões', 'Permite ajustar permissões individuais por usuário.', NOW(), NOW()),
+    (3, 'tickets.manage', 'Gerenciar tickets', 'Autoriza atualizar tickets e interações.', NOW(), NOW()),
+    (4, 'tickets.assign', 'Atribuir tickets', 'Permite atribuir e transferir tickets.', NOW(), NOW()),
+    (5, 'templates.manage', 'Gerenciar templates', 'Permite criar e atualizar templates compartilhados.', NOW(), NOW()),
+    (6, 'logs.view', 'Visualizar logs', 'Permite acessar o monitor de logs e o live tail.', NOW(), NOW()),
+    (7, 'webhook.manage', 'Configurar webhook', 'Permite ajustar integrações de webhook e Evolution.', NOW(), NOW()),
+    (8, 'reports.view', 'Visualizar relatórios', 'Permite acessar dashboards e relatórios administrativos.', NOW(), NOW()),
+    (9, 'feedback.view', 'Visualizar avaliações', 'Permite consultar notas e comentários de atendimento.', NOW(), NOW())
+ON DUPLICATE KEY UPDATE
+    label = VALUES(label),
+    description = VALUES(description),
+    updated_at = NOW();
 
 -- Seed administrative and helpdesk users
 INSERT INTO users (
@@ -27,6 +53,23 @@ ON DUPLICATE KEY UPDATE
     role_id = VALUES(role_id),
     is_active = VALUES(is_active),
     password_hash = VALUES(password_hash);
+
+INSERT INTO user_permissions (
+    user_id,
+    permission_id,
+    granted_by,
+    granted_at
+) VALUES
+    (1, 1, 1, NOW()),
+    (1, 2, 1, NOW()),
+    (1, 3, 1, NOW()),
+    (1, 4, 1, NOW()),
+    (1, 5, 1, NOW()),
+    (1, 8, 1, NOW()),
+    (1, 9, 1, NOW())
+ON DUPLICATE KEY UPDATE
+    granted_at = VALUES(granted_at),
+    granted_by = VALUES(granted_by);
 
 -- Seed default message templates
 INSERT INTO templates (
@@ -67,6 +110,45 @@ ON DUPLICATE KEY UPDATE
     last_interaction_at = VALUES(last_interaction_at),
     updated_at = NOW();
 
+-- Seed support groups and targets
+INSERT INTO support_groups (
+    id,
+    name,
+    slug,
+    description,
+    created_at,
+    updated_at
+) VALUES
+    (1, 'Atendimento Inicial', 'atendimento-inicial', 'Fila padrão para triagem de atendimentos.', NOW(), NOW()),
+    (2, 'Suporte Nível 2', 'suporte-n2', 'Fila especializada para escalonamento.', NOW(), NOW())
+ON DUPLICATE KEY UPDATE
+    name = VALUES(name),
+    description = VALUES(description),
+    updated_at = NOW();
+
+INSERT INTO support_group_targets (
+    group_id,
+    target_tma,
+    target_tme,
+    updated_at,
+    updated_by
+) VALUES
+    (1, 5, 15, NOW(), 1),
+    (2, 10, 25, NOW(), 1)
+ON DUPLICATE KEY UPDATE
+    target_tma = VALUES(target_tma),
+    target_tme = VALUES(target_tme),
+    updated_at = NOW(),
+    updated_by = VALUES(updated_by);
+
+INSERT INTO user_groups (user_id, group_id, assigned_by, assigned_at) VALUES
+    (1, 1, 1, NOW()),
+    (1, 2, 1, NOW()),
+    (2, 1, 1, NOW())
+ON DUPLICATE KEY UPDATE
+    assigned_by = VALUES(assigned_by),
+    assigned_at = NOW();
+
 -- Seed tickets with metrics and messages
 INSERT INTO tickets (
     id,
@@ -74,29 +156,45 @@ INSERT INTO tickets (
     subject,
     status,
     priority,
+    seriousness,
     assigned_user_id,
+    group_id,
     opened_at,
     closed_at,
     sla_due_at,
     channel
 ) VALUES
-    (1, 1, 'Dúvida sobre faturamento', 'assigned', 'normal', 2, NOW() - INTERVAL 2 HOUR, NULL, NOW() + INTERVAL 2 HOUR, 'whatsapp')
+    (1, 1, 'Dúvida sobre faturamento', 'assigned', 'normal', 'medium', 2, 1, NOW() - INTERVAL 2 HOUR, NULL, NOW() + INTERVAL 2 HOUR, 'whatsapp')
 ON DUPLICATE KEY UPDATE
     status = VALUES(status),
     priority = VALUES(priority),
+    seriousness = VALUES(seriousness),
     assigned_user_id = VALUES(assigned_user_id),
+    group_id = VALUES(group_id),
     sla_due_at = VALUES(sla_due_at);
 
 INSERT INTO ticket_metrics (
     ticket_id,
     first_response_at,
-    last_response_at,
-    resolution_time_seconds
+    last_touch_at,
+    queue_time_sec,
+    sla_due_at,
+    sla_status
 ) VALUES
-    (1, NOW() - INTERVAL 90 MINUTE, NOW() - INTERVAL 15 MINUTE, NULL)
+    (
+        1,
+        NOW() - INTERVAL 90 MINUTE,
+        NOW() - INTERVAL 15 MINUTE,
+        900,
+        NOW() + INTERVAL 2 HOUR,
+        'ok'
+    )
 ON DUPLICATE KEY UPDATE
     first_response_at = VALUES(first_response_at),
-    last_response_at = VALUES(last_response_at);
+    last_touch_at = VALUES(last_touch_at),
+    queue_time_sec = VALUES(queue_time_sec),
+    sla_due_at = VALUES(sla_due_at),
+    sla_status = VALUES(sla_status);
 
 INSERT INTO messages (
     id,
@@ -120,17 +218,35 @@ ON DUPLICATE KEY UPDATE
 -- Seed a log entry to illustrate auditing
 INSERT INTO logs (
     id,
-    user_id,
+    actor_id,
+    corr_id,
     level,
+    service,
     action,
     message,
     context,
     ip_address,
+    route,
     created_at
 ) VALUES
-    (1, 1, 'info', 'seed_import', 'Dados de exemplo carregados para demonstração.', NULL, '127.0.0.1', NOW())
+    (
+        1,
+        1,
+        'seed-log-1',
+        'info',
+        'seed',
+        'seed.import',
+        'Dados de exemplo carregados para demonstração.',
+        NULL,
+        '127.0.0.1',
+        '/',
+        NOW()
+    )
 ON DUPLICATE KEY UPDATE
     message = VALUES(message),
+    service = VALUES(service),
+    action = VALUES(action),
+    route = VALUES(route),
     created_at = NOW();
 
 INSERT INTO settings (

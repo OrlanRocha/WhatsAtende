@@ -7,4 +7,8 @@ $templates = $templates ?? [];
 view('atendimento', [
     'ticket' => $ticket,
     'templates' => $templates,
+    'supportGroups' => $supportGroups,
+    'userGroups' => $userGroups,
+    'seriousnessOptions' => $seriousnessOptions,
+    'agents' => $agents,
 ]);

@@ -15,7 +15,7 @@ class TemplateController
 
     public function index(): void
     {
-        require_role('admin');
+        require_role('admin', 'dev');
         $templates = $this->templateService->list();
 
         if (is_ajax()) {
@@ -24,6 +24,11 @@ class TemplateController
 
         view('admin/templates/index', [
             'templates' => $templates,
+            'pageTitle' => 'Modelos de Resposta',
+            'breadcrumbs' => [
+                ['label' => 'Administração'],
+                ['label' => 'Modelos']
+            ],
             'status' => get_flash('admin_status'),
             'error' => get_flash('admin_error'),
             'formErrors' => get_flash('template_errors') ?? [],
@@ -33,7 +38,7 @@ class TemplateController
 
     public function store(): void
     {
-        $admin = require_role('admin');
+        $admin = require_role('admin', 'dev');
         $isAjax = is_ajax();
 
         $title = trim($_POST['title'] ?? '');
@@ -73,7 +78,7 @@ class TemplateController
 
     public function update(int $templateId): void
     {
-        $admin = require_role('admin');
+        $admin = require_role('admin', 'dev');
         $isAjax = is_ajax();
 
         $title = trim($_POST['title'] ?? '');
@@ -113,7 +118,7 @@ class TemplateController
 
     public function destroy(int $templateId): void
     {
-        $admin = require_role('admin');
+        $admin = require_role('admin', 'dev');
         $isAjax = is_ajax();
 
         $this->templateService->delete($templateId, (int) $admin->id);

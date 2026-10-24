@@ -75,16 +75,26 @@ class EvolutionController
         }
 
         $result = $this->evolution->getProfilePicture($remoteJid);
-        if (($result['status'] ?? 500) === 200 && isset($result['path'])) {
+        $status = (int) ($result['status'] ?? 500);
+
+        if ($status === 200 && isset($result['path'])) {
+            header('Cache-Control: public, max-age=3600');
             header('Content-Type: ' . ($result['content_type'] ?? 'image/jpeg'));
             readfile($result['path']);
             exit;
         }
 
+        if ($status === 404) {
+            header('Cache-Control: public, max-age=3600');
+            http_response_code(204);
+            header('Content-Length: 0');
+            exit;
+        }
+
         json_response([
-            'status' => $result['status'] ?? 500,
+            'status' => $status,
             'error' => $result['error'] ?? 'Foto não encontrada',
-        ], $result['status'] ?? 500);
+        ], $status);
     }
 
     public function media(): void
@@ -99,6 +109,7 @@ class EvolutionController
 
         $result = $this->evolution->getMedia($messageId);
         if (($result['status'] ?? 500) === 200 && isset($result['path'])) {
+            header('Cache-Control: public, max-age=86400');
             header('Content-Type: ' . ($result['content_type'] ?? 'application/octet-stream'));
             header('Content-Disposition: inline');
             readfile($result['path']);
@@ -143,7 +154,7 @@ class EvolutionController
 
         json_response([
             'status' => $result['status'],
-            'error' => $result['error'] ?? 'Falha ao enviar mensagem.',
+            'error' => $result['error_detail'] ?? $result['error'] ?? 'Falha ao enviar mensagem.',
         ], $result['status']);
     }
 
@@ -170,6 +181,10 @@ class EvolutionController
             json_response(['status' => 401, 'error' => 'Acesso não autorizado.'], 401);
         }
 
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+
         return $user;
     }
 
@@ -194,7 +209,7 @@ class EvolutionController
 
         json_response([
             'status' => $result['status'],
-            'error' => $result['error'] ?? 'Falha ao consultar Evolution API.',
+            'error' => $result['error_detail'] ?? $result['error'] ?? 'Falha ao consultar Evolution API.',
         ], $result['status']);
     }
 

@@ -59,7 +59,12 @@ class FileLogger
             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         }
 
-        file_put_contents($this->path, $encoded . PHP_EOL, FILE_APPEND | LOCK_EX);
+        $targetPath = $this->path;
+        if (in_array(strtolower($level), ['error', 'critical', 'alert', 'emergency'], true)) {
+            $targetPath = dirname($this->path) . '/error.log';
+        }
+
+        file_put_contents($targetPath, $encoded . PHP_EOL, FILE_APPEND | LOCK_EX);
     }
 
     private function normalizeContext(array $context): array

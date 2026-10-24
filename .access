@@ -1,0 +1,18 @@
+# Apache access configuration for WhatsAtende
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Block direct access to sensitive directories
+    RewriteRule ^(app|config|database|routes)/ - [F,L]
+
+    # Serve existing files that live inside the public directory
+    RewriteCond %{DOCUMENT_ROOT}/public%{REQUEST_URI} -f
+    RewriteRule ^(.*)$ public/$1 [L]
+
+    # Serve existing directories that live inside the public directory
+    RewriteCond %{DOCUMENT_ROOT}/public%{REQUEST_URI} -d
+    RewriteRule ^(.*)$ public/$1/ [L]
+
+    # Otherwise, send the request to the front controller
+    RewriteRule ^ public/index.php [QSA,L]
+</IfModule>

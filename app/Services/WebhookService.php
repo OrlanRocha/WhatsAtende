@@ -31,8 +31,43 @@ class WebhookService
             $mediaUrl = $payload['message']['mediaUrl'] ?? null;
             $mediaType = $payload['message']['type'] ?? 'text';
 
+            // Evolution API v2 normalization
+            if (isset($payload['event'])) {
+                if ($payload['event'] !== 'messages.upsert') {
+                    $this->storeWebhookEvent($provider, null, $payload);
+                    $this->connection->commit();
+                    return 0;
+                }
+                
+                if (isset($payload['data'])) {
+                    $data = $payload['data'];
+                    $messageId = $data['key']['id'] ?? $messageId;
+                $contactExternalId = $data['key']['remoteJid'] ?? $contactExternalId;
+                $contactName = $data['pushName'] ?? $contactName;
+                
+                // Content resolution
+                $evMessage = $data['message'] ?? [];
+                $messageBody = $evMessage['conversation'] 
+                    ?? $evMessage['extendedTextMessage']['text'] 
+                    ?? $evMessage['imageMessage']['caption'] 
+                    ?? $evMessage['videoMessage']['caption'] 
+                    ?? $evMessage['documentMessage']['fileName'] 
+                    ?? $messageBody;
+                
+                // Media Type detection
+                if (isset($evMessage['imageMessage'])) $mediaType = 'image';
+                elseif (isset($evMessage['videoMessage'])) $mediaType = 'video';
+                elseif (isset($evMessage['audioMessage'])) $mediaType = 'audio';
+                elseif (isset($evMessage['documentMessage'])) $mediaType = 'file';
+                }
+            }
+
             if ($contactExternalId === null) {
-                throw new \InvalidArgumentException('Contact identifier is required.');
+                // Try one more fallback for non-v2 or different formats
+                $contactExternalId = $payload['key']['remoteJid'] ?? null;
+                if ($contactExternalId === null) {
+                    throw new \InvalidArgumentException('Contact identifier is required.');
+                }
             }
 
             $this->storeWebhookEvent($provider, $messageId, $payload);
@@ -123,7 +158,7 @@ class WebhookService
     private function findOrCreateTicket(int $contactId, string $channel): int
     {
         $stmt = $this->connection->prepare(
-            'SELECT id FROM tickets WHERE contact_id = :contact_id AND DATE(opened_at) = CURRENT_DATE()
+            'SELECT id FROM tickets WHERE contact_id = :contact_id
              AND status IN (:status_open, :status_assigned) ORDER BY opened_at DESC LIMIT 1'
         );
         $stmt->execute([
@@ -137,20 +172,29 @@ class WebhookService
             return (int) $ticketId;
         }
 
+        $stmtSla = $this->connection->query("SELECT `value` FROM settings WHERE `key` = 'default_tma_minutes'");
+        $slaSetting = $stmtSla->fetch(\PDO::FETCH_ASSOC);
+        $slaMinutes = isset($slaSetting['value']) ? (int) $slaSetting['value'] : 15;
+        
+        $now = new \DateTimeImmutable();
+        $slaDueAt = $now->modify('+' . $slaMinutes . ' minutes')->format('Y-m-d H:i:s');
+
         $stmtInsert = $this->connection->prepare(
-            'INSERT INTO tickets (contact_id, status, priority, channel) VALUES (:contact_id, :status, :priority, :channel)'
+            'INSERT INTO tickets (contact_id, status, priority, channel, sla_due_at) VALUES (:contact_id, :status, :priority, :channel, :sla_due_at)'
         );
         $stmtInsert->execute([
             'contact_id' => $contactId,
             'status' => Ticket::STATUS_OPEN,
             'priority' => Ticket::PRIORITY_NORMAL,
             'channel' => $channel,
+            'sla_due_at' => $slaDueAt,
         ]);
 
         $newTicketId = (int) $this->connection->lastInsertId();
 
         $this->connection->prepare(
-            'INSERT INTO ticket_metrics (ticket_id, first_response_at) VALUES (:ticket_id, NULL)'
+            'INSERT INTO ticket_metrics (ticket_id) VALUES (:ticket_id)'
+            . ' ON DUPLICATE KEY UPDATE ticket_id = ticket_id'
         )->execute(['ticket_id' => $newTicketId]);
 
         $this->logger->info('ticket.created_from_webhook', [
